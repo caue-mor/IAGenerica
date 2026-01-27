@@ -266,6 +266,11 @@ class ConversationGraph:
 
         logger.info(f"[FLOW] Node type: {node_type}")
 
+        # Detect question-type nodes (NOME, EMAIL, TELEFONE, etc.)
+        # These are custom types that function like QUESTION nodes
+        question_like_types = ["NOME", "EMAIL", "TELEFONE", "PHONE", "CPF", "CNPJ", "ENDERECO", "ADDRESS", "DATA", "DATE", "NUMERO", "NUMBER"]
+        is_question_type = node_type in question_like_types or (config.get("pergunta") and config.get("campo_destino"))
+
         # Process based on node type
         if node_type == "GREETING":
             message = self._process_template(config.get("mensagem", "Ola!"), lead_data)
@@ -277,23 +282,29 @@ class ConversationGraph:
             result["response"] = message
             result["current_node_id"] = node.get("next_node_id")
 
-        elif node_type == "QUESTION":
+        elif node_type == "QUESTION" or is_question_type:
+            # Handle QUESTION and question-like types (NOME, EMAIL, etc.)
             # Check if we're waiting for an answer
             pending_field = state.get("pending_field")
             user_message = self._get_last_user_message(state)
+            campo_destino = config.get("campo_destino") or node_type.lower()
 
-            if pending_field == config.get("campo_destino") and user_message:
+            logger.info(f"[FLOW] Question node: pending_field={pending_field}, campo_destino={campo_destino}, user_msg={user_message[:30] if user_message else None}")
+
+            if pending_field == campo_destino and user_message:
                 # Process the answer
                 extracted = await self._extract_field_value(
                     user_message,
-                    config.get("campo_destino", "resposta"),
+                    campo_destino,
                     config.get("tipo_campo", "text"),
                     config.get("opcoes")
                 )
 
+                logger.info(f"[FLOW] Extracted value: {extracted}")
+
                 if extracted and extracted != "INVALID":
                     # Save the value
-                    field_name = config.get("campo_destino", "resposta")
+                    field_name = campo_destino
                     collected_fields = dict(state.get("collected_fields", {}) or {})
                     collected_fields[field_name] = extracted
 
@@ -309,9 +320,11 @@ class ConversationGraph:
                     result["pending_question"] = None
                     result["current_node_id"] = node.get("next_node_id")
 
+                    logger.info(f"[FLOW] Field saved: {field_name}={extracted}, next_node={result['current_node_id']}")
+
                     # Process next node immediately if it's not a question
                     next_node = self._get_flow_node(flow_config, node.get("next_node_id"))
-                    if next_node and next_node.get("type") != "QUESTION":
+                    if next_node and next_node.get("type") not in ["QUESTION"] + question_like_types:
                         # Recursively process next node
                         return await self._flow_executor_node({**state, **result})
                 else:
@@ -321,8 +334,9 @@ class ConversationGraph:
                 # Ask the question
                 question = self._process_template(config.get("pergunta", ""), lead_data)
                 result["response"] = question
-                result["pending_field"] = config.get("campo_destino")
+                result["pending_field"] = campo_destino
                 result["pending_question"] = question
+                logger.info(f"[FLOW] Asking question: {question}, pending_field={campo_destino}")
 
         elif node_type == "CONDITION":
             # Evaluate condition
@@ -688,6 +702,13 @@ async def invoke_agent(
         current_node_id=conversation.current_node_id
     )
 
+    # Load pending_field from conversation context
+    conv_context = conversation.context or {}
+    if conv_context.get("pending_field"):
+        state["pending_field"] = conv_context.get("pending_field")
+        state["pending_question"] = conv_context.get("pending_question")
+        logger.info(f"[AGENT] Loaded pending_field from context: {state['pending_field']}")
+
     # Update AI enabled status
     state["ai_enabled"] = conversation.ai_enabled and lead.ai_enabled
 
@@ -722,6 +743,15 @@ async def invoke_agent(
     if new_node_id != conversation.current_node_id:
         await db.update_conversation_node(conversation.id, new_node_id)
 
+    # Save pending_field to conversation context
+    new_context = {
+        "pending_field": result.get("pending_field"),
+        "pending_question": result.get("pending_question"),
+        "collected_fields": result.get("collected_fields", {})
+    }
+    await db.update_conversation_context(conversation.id, new_context)
+    logger.info(f"[AGENT] Saved context: pending_field={new_context.get('pending_field')}")
+
     # Return formatted result
     return {
         "response": result.get("response", ""),
@@ -730,7 +760,8 @@ async def invoke_agent(
         "handoff_reason": result.get("handoff_reason"),
         "current_node_id": result.get("current_node_id"),
         "lead_data": merge_lead_data(result, {}),
-        "flow_completed": result.get("flow_completed", False)
+        "flow_completed": result.get("flow_completed", False),
+        "pending_field": result.get("pending_field")
     }
 
 
