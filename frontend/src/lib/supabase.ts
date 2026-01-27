@@ -1,9 +1,49 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Lazy initialization to avoid build-time errors
+let supabaseInstance: SupabaseClient | null = null;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function getSupabaseClient(): SupabaseClient {
+  if (supabaseInstance) return supabaseInstance;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    // During build time, return a dummy client that won't be used
+    if (typeof window === 'undefined') {
+      console.warn('Supabase credentials not available during build');
+      // Return a minimal mock for SSG/build time
+      return {
+        auth: {
+          getSession: async () => ({ data: { session: null }, error: null }),
+          onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+          signInWithPassword: async () => ({ data: null, error: new Error('Not configured') }),
+          signUp: async () => ({ data: null, error: new Error('Not configured') }),
+          signOut: async () => ({ error: null }),
+        },
+        from: () => ({
+          select: () => ({ data: [], error: null }),
+          insert: () => ({ data: null, error: null }),
+          update: () => ({ data: null, error: null }),
+          delete: () => ({ data: null, error: null }),
+        }),
+      } as unknown as SupabaseClient;
+    }
+    throw new Error('Supabase credentials not configured');
+  }
+
+  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+  return supabaseInstance;
+}
+
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_, prop) {
+    const client = getSupabaseClient();
+    const value = (client as any)[prop];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+});
 
 // Helper for API calls
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
