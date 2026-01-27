@@ -160,9 +160,14 @@ function FlowBuilderContent() {
   // Handle edge connection
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+
       const newEdge: CustomFlowEdge = {
-        ...connection,
         id: `edge-${connection.source}-${connection.sourceHandle || ''}-${connection.target}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
         type: 'smoothstep',
         animated: true,
         style: { strokeWidth: 2 },
