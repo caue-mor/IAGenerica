@@ -377,22 +377,33 @@ class UazapiService:
         # Direct status field
         status = data.get("status")
 
+        # If status is a dict, try to extract the actual status
+        if isinstance(status, dict):
+            status = status.get("status") or status.get("state") or status.get("connection")
+
         # Check for connected boolean
         if data.get("connected") is True:
             return "connected"
         if data.get("connected") is False:
             return "disconnected"
 
+        # Check instance.status if exists
+        instance = data.get("instance")
+        if isinstance(instance, dict):
+            instance_status = instance.get("status")
+            if isinstance(instance_status, str):
+                status = instance_status
+
         # Check for state field
         state = data.get("state")
-        if state:
+        if state and isinstance(state, str):
             if state.lower() in ["open", "connected"]:
                 return "connected"
             elif state.lower() in ["close", "closed", "disconnected"]:
                 return "disconnected"
 
         # Normalize status string
-        if status:
+        if status and isinstance(status, str):
             status_lower = status.lower()
             if status_lower in ["open", "connected", "online"]:
                 return "connected"
@@ -400,8 +411,9 @@ class UazapiService:
                 return "disconnected"
             elif status_lower in ["connecting", "opening"]:
                 return "connecting"
+            return status_lower
 
-        return status or "unknown"
+        return "unknown"
 
     # ==========================================
     # WEBHOOK CONFIGURATION

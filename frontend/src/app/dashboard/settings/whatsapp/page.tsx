@@ -36,7 +36,9 @@ interface WhatsAppStatus {
 }
 
 interface ConnectResponse {
-  qr_code?: string;
+  success: boolean;
+  qrcode?: string;
+  paircode?: string;
   status: string;
   message?: string;
 }
@@ -186,8 +188,8 @@ export default function WhatsAppSettingsPage() {
         type: 'qrcode'
       });
 
-      if (data.qr_code) {
-        setQrCode(data.qr_code);
+      if (data.qrcode) {
+        setQrCode(data.qrcode);
         setIsConnecting(true);
 
         // Start polling for connection status
