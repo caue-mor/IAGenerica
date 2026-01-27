@@ -1,6 +1,6 @@
 """
 Notification Service
-Sends notifications to team members about important events
+Sends notifications to team members about important events via WhatsApp
 """
 import logging
 from typing import Optional, Dict, Any, List
@@ -8,6 +8,8 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 import httpx
+
+from .database import db
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,10 @@ class NotificationService:
         if company_id in self.webhooks:
             await self._send_to_webhook(company_id, notification)
 
+        # Send via WhatsApp for high priority notifications
+        if priority in [NotificationPriority.HIGH, NotificationPriority.URGENT]:
+            await self._send_whatsapp_notification(company_id, notification)
+
         return notification
 
     async def _send_to_webhook(
@@ -182,6 +188,89 @@ class NotificationService:
 
         except Exception as e:
             logger.error(f"Error sending notification to webhook: {e}")
+            return False
+
+    async def _send_whatsapp_notification(
+        self,
+        company_id: int,
+        notification: Notification
+    ) -> bool:
+        """
+        Send notification via WhatsApp to admin/team.
+
+        Args:
+            company_id: Company ID
+            notification: Notification to send
+
+        Returns:
+            True if sent successfully
+        """
+        try:
+            # Get company info
+            company = await db.get_company(company_id)
+            if not company:
+                logger.error(f"Company {company_id} not found for WhatsApp notification")
+                return False
+
+            # Check if we have WhatsApp configured
+            if not company.uazapi_instancia or not company.uazapi_token:
+                logger.warning(f"Company {company_id} has no UAZAPI configured")
+                return False
+
+            # Get admin phone from company config or use company's own number
+            admin_phone = getattr(company, 'notification_phone', None) or company.whatsapp_numero
+            if not admin_phone:
+                logger.warning(f"Company {company_id} has no notification phone configured")
+                return False
+
+            # Create WhatsApp service
+            from .whatsapp import create_whatsapp_service
+            wa = create_whatsapp_service(
+                instance=company.uazapi_instancia,
+                token=company.uazapi_token
+            )
+
+            # Format message based on notification type
+            emoji_map = {
+                NotificationType.NEW_LEAD: "🆕",
+                NotificationType.LEAD_QUALIFIED: "⭐",
+                NotificationType.HANDOFF_REQUEST: "🚨",
+                NotificationType.FOLLOW_UP_NEEDED: "⏰",
+                NotificationType.PROPOSAL_REQUESTED: "📋",
+                NotificationType.DOCUMENT_RECEIVED: "📎",
+                NotificationType.APPOINTMENT_SCHEDULED: "📅",
+                NotificationType.URGENT: "⚠️",
+                NotificationType.ERROR: "❌",
+                NotificationType.INFO: "ℹ️",
+            }
+
+            emoji = emoji_map.get(notification.notification_type, "📢")
+            priority_text = ""
+            if notification.priority == NotificationPriority.URGENT:
+                priority_text = " *[URGENTE]*"
+            elif notification.priority == NotificationPriority.HIGH:
+                priority_text = " *[IMPORTANTE]*"
+
+            message = f"""{emoji}{priority_text} *{notification.title}*
+
+{notification.message}
+
+_Notificação automática do sistema_"""
+
+            # Send the message
+            result = await wa.send_text(to=admin_phone, message=message)
+
+            if result:
+                notification.delivered = True
+                notification.delivered_at = datetime.now()
+                logger.info(f"WhatsApp notification sent to {admin_phone}: {notification.title}")
+                return True
+            else:
+                logger.warning(f"Failed to send WhatsApp notification to {admin_phone}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp notification: {e}")
             return False
 
     def configure_webhook(

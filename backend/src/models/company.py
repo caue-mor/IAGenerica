@@ -26,6 +26,7 @@ class Company(BaseModel):
     uazapi_instancia: Optional[str] = None
     uazapi_token: Optional[str] = None
     whatsapp_numero: Optional[str] = None
+    notification_phone: Optional[str] = None  # Admin phone for notifications
     agent_name: str = "Assistente"
     agent_tone: str = "amigavel"
     use_emojis: bool = False
@@ -49,6 +50,7 @@ class CompanyCreate(BaseModel):
     uazapi_instancia: Optional[str] = None
     uazapi_token: Optional[str] = None
     whatsapp_numero: Optional[str] = None
+    notification_phone: Optional[str] = None  # Admin phone for notifications
     agent_name: str = "Assistente"
     agent_tone: str = "amigavel"
     use_emojis: bool = False
@@ -67,6 +69,7 @@ class CompanyUpdate(BaseModel):
     uazapi_instancia: Optional[str] = None
     uazapi_token: Optional[str] = None
     whatsapp_numero: Optional[str] = None
+    notification_phone: Optional[str] = None  # Admin phone for notifications
     agent_name: Optional[str] = None
     agent_tone: Optional[str] = None
     use_emojis: Optional[bool] = None
