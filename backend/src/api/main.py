@@ -12,7 +12,8 @@ from .routes import (
     companies_router,
     whatsapp_router,
     whatsapp_connect_router,
-    voice_router
+    voice_router,
+    lead_statuses_router
 )
 
 # Configure logging
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(webhook_router)
     app.include_router(leads_router, prefix="/api")
     app.include_router(companies_router, prefix="/api")
+    app.include_router(lead_statuses_router, prefix="/api")
     app.include_router(whatsapp_router)  # WhatsApp/UAZAPI management (legacy)
     app.include_router(whatsapp_connect_router)  # WhatsApp connection management (new)
     app.include_router(voice_router, prefix="/api")  # Voice/TTS service
