@@ -44,7 +44,7 @@ class UazapiService:
             admin_token: Admin token for instance creation (defaults to env UAZAPI_ADMIN_TOKEN)
             instance_token: Instance token for instance operations
         """
-        self.base_url = (base_url or settings.UAZAPI_BASE_URL).rstrip("/")
+        self.base_url = (base_url or settings.UAZAPI_SERVER).rstrip("/")
         self.admin_token = admin_token or settings.UAZAPI_ADMIN_TOKEN
         self.instance_token = instance_token
 

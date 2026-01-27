@@ -27,11 +27,16 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 
-    # UAZAPI
-    UAZAPI_BASE_URL: str = "https://api.uazapi.com"
+    # UAZAPI (supports both UAZAPI_SERVER and UAZAPI_BASE_URL)
+    UAZAPI_SERVER: str = "https://api.uazapi.com"
     UAZAPI_TOKEN: Optional[str] = None
     UAZAPI_ADMIN_TOKEN: Optional[str] = None
     WEBHOOK_BASE_URL: Optional[str] = None  # For webhook configuration
+
+    @property
+    def UAZAPI_BASE_URL(self) -> str:
+        """Alias for UAZAPI_SERVER for backwards compatibility"""
+        return self.UAZAPI_SERVER
 
     # Eleven Labs (Text-to-Speech)
     ELEVEN_LABS_API_KEY: Optional[str] = None
