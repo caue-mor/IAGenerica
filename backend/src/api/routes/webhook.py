@@ -169,3 +169,121 @@ async def test_webhook(company_id: int):
         "company": company.empresa,
         "uazapi_configured": bool(company.uazapi_instancia and company.uazapi_token)
     }
+
+
+# ==========================================
+# GLOBAL WEBHOOK (for all instances)
+# ==========================================
+
+@router.post("/webhook/global")
+async def receive_global_webhook(
+    payload: dict[str, Any],
+    background_tasks: BackgroundTasks
+):
+    """
+    Global webhook endpoint for all UAZAPI instances.
+
+    This endpoint receives webhooks from any instance and routes them
+    to the correct company based on:
+    1. adminField02 (company_id stored during instance creation)
+    2. Instance token lookup in database
+
+    Configure this URL in UAZAPI webhook settings:
+    https://your-domain.com/webhook/global
+
+    Events to enable: connection, messages
+    Exclude: wasSentByApi, isGroupYes
+    """
+    try:
+        logger.info(f"Global webhook received: {payload.get('event', 'unknown')}")
+
+        # Extract company_id from payload
+        company_id = None
+
+        # Try adminField02 first (set during instance creation)
+        instance_data = payload.get("instance", {})
+        admin_field_02 = instance_data.get("adminField02")
+
+        if admin_field_02:
+            try:
+                company_id = int(admin_field_02)
+                logger.info(f"Company ID from adminField02: {company_id}")
+            except (ValueError, TypeError):
+                pass
+
+        # Try to find by token if adminField02 not available
+        if not company_id:
+            token = instance_data.get("token")
+            if token:
+                # Look up company by token
+                company = await db.get_company_by_token(token)
+                if company:
+                    company_id = company.id
+                    logger.info(f"Company ID from token lookup: {company_id}")
+
+        # Try to find by instance name (iagenerica-{company_id})
+        if not company_id:
+            instance_name = instance_data.get("name", "")
+            if instance_name.startswith("iagenerica-"):
+                try:
+                    company_id = int(instance_name.replace("iagenerica-", ""))
+                    logger.info(f"Company ID from instance name: {company_id}")
+                except (ValueError, TypeError):
+                    pass
+
+        if not company_id:
+            logger.warning(f"Could not determine company_id from payload")
+            return {"status": "ignored", "reason": "company_id not found"}
+
+        # Handle connection events
+        event = payload.get("event", "")
+        if event in ["connection", "connection.update"]:
+            await handle_connection_event(company_id, payload)
+            return {"status": "received", "event": "connection"}
+
+        # Parse and process message events
+        webhook = parse_webhook(payload)
+
+        if not webhook.is_message_event:
+            return {"status": "ignored", "reason": "not a message event"}
+
+        # Process in background
+        background_tasks.add_task(process_message, company_id, webhook)
+
+        return {"status": "received", "company_id": company_id}
+
+    except Exception as e:
+        logger.exception(f"Global webhook error: {e}")
+        # Don't raise - always return 200 to avoid UAZAPI retries
+        return {"status": "error", "message": str(e)}
+
+
+async def handle_connection_event(company_id: int, payload: dict):
+    """Handle connection status change events"""
+    try:
+        instance_data = payload.get("instance", {})
+        status = instance_data.get("status", "")
+        owner = instance_data.get("owner", "")
+
+        # Extract phone number from owner (format: 5511999999999@s.whatsapp.net)
+        phone = owner.replace("@s.whatsapp.net", "") if owner else None
+
+        logger.info(f"Connection event for company {company_id}: status={status}, phone={phone}")
+
+        # Update company status
+        update_data = {}
+
+        if status == "connected" and phone:
+            update_data["whatsapp_numero"] = phone
+            update_data["whatsapp_status"] = "connected"
+        elif status in ["disconnected", "close"]:
+            update_data["whatsapp_status"] = "disconnected"
+        elif status == "connecting":
+            update_data["whatsapp_status"] = "connecting"
+
+        if update_data:
+            await db.update_company(company_id, update_data)
+            logger.info(f"Updated company {company_id} status: {update_data}")
+
+    except Exception as e:
+        logger.exception(f"Error handling connection event: {e}")

@@ -41,6 +41,13 @@ class DatabaseService:
             return Company(**response.data)
         return None
 
+    async def get_company_by_token(self, token: str) -> Optional[Company]:
+        """Get company by UAZAPI token"""
+        response = supabase.table(COMPANIES_TABLE).select("*").eq("uazapi_token", token).single().execute()
+        if response.data:
+            return Company(**response.data)
+        return None
+
     async def list_companies(self) -> list[Company]:
         """List all companies"""
         response = supabase.table(COMPANIES_TABLE).select("*").order("id").execute()
