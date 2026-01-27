@@ -422,10 +422,17 @@ Responda APENAS com o texto humanizado, sem explicacoes adicionais."""
         # Add relevant conversation history (last 4 messages for context)
         if conversation_history:
             for msg in conversation_history[-4:]:
-                messages.append({
-                    "role": msg.role,
-                    "content": msg.content
-                })
+                # Handle both dict and ConversationMessage objects
+                if isinstance(msg, dict):
+                    messages.append({
+                        "role": msg.get("role", "user"),
+                        "content": msg.get("content", "")
+                    })
+                else:
+                    messages.append({
+                        "role": getattr(msg, "role", "user"),
+                        "content": getattr(msg, "content", "")
+                    })
 
         # Add the humanization request
         humanization_request = f"""

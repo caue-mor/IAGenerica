@@ -32,6 +32,7 @@ from ..services.notification import notification_service
 from ..flow.executor import FlowExecutor
 from ..flow.humanizer import ConversationalQuestionHandler, HumanizerContext
 from ..flow.extractor import extractor, ExtractionConfidence
+from .intelligent_flow import intelligent_flow, intelligent_extractor, FlowContext
 from .state import (
     AgentState,
     CompanyConfig,
@@ -286,8 +287,35 @@ class ConversationGraph:
 
         # Process based on node type
         if node_type == "GREETING":
-            message = self._process_template(config.get("mensagem", "Ola!"), lead_data)
-            result["response"] = message
+            template_message = self._process_template(config.get("mensagem", "Ola!"), lead_data)
+            user_message = self._get_last_user_message(state)
+
+            # Use AI to generate a natural greeting that responds to user
+            if user_message:
+                flow_ctx = FlowContext(
+                    current_node_id=current_node_id,
+                    node_type=node_type,
+                    node_config=config,
+                    field_to_collect=None,
+                    question_to_ask=None,
+                    collected_fields=dict(state.get("collected_fields", {}) or {}),
+                    lead_name=state.get("lead_name"),
+                    company_info={
+                        "agent_name": state.get("company_config", {}).get("agent_name", "Assistente"),
+                        "nome_empresa": state.get("company_config", {}).get("company_name", "nossa empresa"),
+                        "agent_tone": state.get("company_config", {}).get("agent_tone", "amigavel"),
+                        "use_emojis": state.get("company_config", {}).get("use_emojis", False),
+                    },
+                    conversation_history=state.get("messages", [])[-5:]
+                )
+                result["response"] = await intelligent_flow.generate_greeting_response(
+                    user_message=user_message,
+                    flow_context=flow_ctx,
+                    greeting_text=template_message
+                )
+            else:
+                result["response"] = template_message
+
             result["current_node_id"] = node.get("next_node_id")
 
         elif node_type == "MESSAGE":
@@ -341,8 +369,67 @@ class ConversationGraph:
                         # Recursively process next node
                         return await self._flow_executor_node({**state, **result})
                 else:
-                    # Invalid answer, ask again
-                    result["response"] = f"Desculpe, nao entendi. {config.get('pergunta', 'Pode repetir?')}"
+                    # Invalid answer - use AI to generate natural response
+                    logger.info(f"[FLOW] Extraction failed, using AI to generate response")
+
+                    # Build flow context for intelligent response
+                    flow_ctx = FlowContext(
+                        current_node_id=current_node_id,
+                        node_type=node_type,
+                        node_config=config,
+                        field_to_collect=campo_destino,
+                        question_to_ask=config.get("pergunta"),
+                        collected_fields=dict(state.get("collected_fields", {}) or {}),
+                        lead_name=state.get("lead_name"),
+                        company_info={
+                            "agent_name": state.get("company_config", {}).get("agent_name", "Assistente"),
+                            "nome_empresa": state.get("company_config", {}).get("company_name", "nossa empresa"),
+                            "agent_tone": state.get("company_config", {}).get("agent_tone", "amigavel"),
+                            "use_emojis": state.get("company_config", {}).get("use_emojis", False),
+                            "informacoes_complementares": state.get("company_config", {}).get("extra_info", "")
+                        },
+                        conversation_history=state.get("messages", [])[-10:]
+                    )
+
+                    # Use AI to process the message and generate natural response
+                    ai_result = await intelligent_flow.process_user_message(
+                        user_message=user_message,
+                        flow_context=flow_ctx,
+                        state=state
+                    )
+
+                    # Check if AI extracted a valid value
+                    if ai_result.get("is_valid") and ai_result.get("extracted_value"):
+                        # AI successfully extracted the value
+                        extracted = ai_result["extracted_value"]
+                        field_name = campo_destino
+                        collected_fields = dict(state.get("collected_fields", {}) or {})
+                        collected_fields[field_name] = extracted
+
+                        # Save the value
+                        if field_name.lower() == "nome":
+                            result["lead_name"] = extracted
+                            await db.update_lead_name(state["lead_id"], extracted)
+                        else:
+                            await db.update_lead_field(state["lead_id"], field_name, extracted)
+
+                        result["collected_fields"] = collected_fields
+                        result["pending_field"] = None
+                        result["pending_question"] = None
+                        result["current_node_id"] = node.get("next_node_id")
+
+                        # Use AI's natural response
+                        result["response"] = ai_result.get("response", f"Perfeito! Registrei {field_name}.")
+
+                        logger.info(f"[FLOW] AI extracted: {field_name}={extracted}")
+
+                        # Process next node if not a question
+                        next_node = self._get_flow_node(flow_config, node.get("next_node_id"))
+                        if next_node and next_node.get("type") not in ["QUESTION"] + question_like_types:
+                            return await self._flow_executor_node({**state, **result})
+                    else:
+                        # AI couldn't extract but generated natural response
+                        result["response"] = ai_result.get("response", config.get("pergunta", "Pode me informar?"))
             else:
                 # Ask the question
                 question = self._process_template(config.get("pergunta", ""), lead_data)
@@ -725,83 +812,46 @@ class ConversationGraph:
         options: Optional[list] = None
     ) -> Optional[str]:
         """
-        Extract a field value from user message.
+        Extract a field value from user message using AI.
 
-        Uses DataExtractor with regex patterns first for speed,
-        falls back to LLM for complex or ambiguous cases.
+        Uses IntelligentExtractor which:
+        - Understands natural language responses
+        - Interprets context and intent
+        - Extracts values even from non-standard formats
         """
-        # Map field type to extractor field type
-        extractor_field = field_name.lower()
-
-        # Common field type mappings
-        field_mappings = {
-            "nome": "nome",
-            "name": "nome",
-            "email": "email",
-            "telefone": "telefone",
-            "phone": "telefone",
-            "celular": "celular",
-            "cpf": "cpf",
-            "cnpj": "cnpj",
-            "cep": "cep",
-            "cidade": "cidade",
-            "city": "cidade",
-            "endereco": "endereco",
-            "address": "endereco",
-            "data": "data",
-            "date": "data",
-            "data_nascimento": "data_nascimento",
-            "valor": "valor",
-            "numero": "numero"
-        }
-
-        extractor_field = field_mappings.get(field_name.lower(), field_name.lower())
-
         try:
-            # First try regex-based extraction (fast)
-            result = extractor.extract_with_details(extractor_field, user_message)
+            logger.info(f"[EXTRACT] Using AI to extract '{field_name}' from: {user_message[:50]}...")
 
-            if result.success and result.confidence in [ExtractionConfidence.HIGH, ExtractionConfidence.MEDIUM]:
-                logger.info(f"[EXTRACT] Regex extracted {field_name}: {result.value} (confidence: {result.confidence.value})")
-                return result.value
-
-            # For options-based fields, check if user message matches any option
-            if options:
-                user_lower = user_message.lower().strip()
-                for opt in options:
-                    if str(opt).lower() in user_lower or user_lower in str(opt).lower():
-                        logger.info(f"[EXTRACT] Option matched for {field_name}: {opt}")
-                        return str(opt)
-
-            # Fall back to LLM for complex extraction
-            prompt = PromptBuilder.build_extraction_prompt(
+            # Use intelligent extractor (LLM-based)
+            extracted_value, is_valid, explanation = await intelligent_extractor.extract_field(
                 user_message=user_message,
                 field_name=field_name,
-                field_type=field_type,
+                field_type=field_type or "text",
                 options=options
             )
 
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
-            extracted = response.content.strip()
+            if is_valid and extracted_value:
+                logger.info(f"[EXTRACT] AI extracted {field_name}: {extracted_value} ({explanation})")
+                return extracted_value
 
-            if extracted and extracted.upper() != "INVALID":
-                logger.info(f"[EXTRACT] LLM extracted {field_name}: {extracted}")
-                return extracted
-
-            # Last resort: if field is nome/cidade/interesse, the whole message might be the answer
-            if extractor_field in ["nome", "cidade", "interesse"] and len(user_message.strip()) >= 2:
+            # Quick fallback for simple cases
+            if field_name.lower() in ["nome", "cidade", "interesse", "tipo"]:
+                # If message is short and looks like a direct answer
                 cleaned = user_message.strip()
-                # Basic cleaning - remove common prefixes
-                prefixes = ["meu nome é", "me chamo", "sou o", "sou a", "pode me chamar de", "moro em", "estou em"]
-                for prefix in prefixes:
-                    if cleaned.lower().startswith(prefix):
-                        cleaned = cleaned[len(prefix):].strip()
-                        break
+                if len(cleaned) >= 2 and len(cleaned.split()) <= 5:
+                    # Remove common prefixes
+                    prefixes = ["meu nome é", "me chamo", "sou o", "sou a", "pode me chamar de",
+                               "moro em", "estou em", "é para", "seria para", "para"]
+                    for prefix in prefixes:
+                        if cleaned.lower().startswith(prefix):
+                            cleaned = cleaned[len(prefix):].strip()
+                            break
 
-                if cleaned and len(cleaned) >= 2:
-                    logger.info(f"[EXTRACT] Fallback extracted {field_name}: {cleaned}")
-                    return cleaned.title() if extractor_field == "nome" else cleaned
+                    if cleaned and len(cleaned) >= 2:
+                        logger.info(f"[EXTRACT] Quick fallback extracted {field_name}: {cleaned}")
+                        return cleaned.title() if field_name.lower() == "nome" else cleaned
 
+            logger.info(f"[EXTRACT] Could not extract {field_name} from message")
             return None
 
         except Exception as e:
