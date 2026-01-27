@@ -123,11 +123,10 @@ async def send_response(
             try:
                 # Send audio as PTT (voice message)
                 audio_data = f"data:audio/ogg;base64,{audio_base64}"
-                send_result = await wa_service.send_media(
+                send_result = await wa_service.send_ptt(
                     to=sender_phone,
-                    media_url=audio_data,
-                    media_type="audio",
-                    as_ptt=True
+                    audio_url=audio_data,
+                    delay=500  # Show "Recording audio..." for 500ms
                 )
                 logger.info(f"Audio response sent to {sender_phone}")
 

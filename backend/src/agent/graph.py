@@ -653,12 +653,18 @@ class ConversationGraph:
                     logger.info(f"[HUMANIZER] Trying OpenAI TTS as fallback...")
 
                     if openai_tts.is_configured():
-                        # Map voice_id to OpenAI voice if needed
-                        openai_voice = "nova"  # Default for Portuguese
+                        # Map voice_id to OpenAI voice or use default from config
+                        openai_voice = openai_tts.voice  # Uses OPENAI_TTS_VOICE from settings
                         if voice_id and voice_id in openai_tts.VOICES:
                             openai_voice = voice_id
 
-                        audio_base64 = await openai_tts.get_audio_base64(response, openai_voice)
+                        # Use gpt-4o-mini-tts with instructions for better voice control
+                        audio_base64 = await openai_tts.get_audio_base64(
+                            text=response,
+                            voice=openai_voice,
+                            instructions=openai_tts.instructions
+                        )
+                        logger.info(f"[HUMANIZER] Using OpenAI TTS: model={openai_tts.model}, voice={openai_voice}")
                         if audio_base64:
                             logger.info(f"[HUMANIZER] OpenAI TTS audio generated ({len(audio_base64)} chars)")
                             audio_generated = True

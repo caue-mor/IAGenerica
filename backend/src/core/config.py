@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     VOICE_ENABLED: bool = False
     VOICE_OUTPUT_FORMAT: str = "opus_48000_64"  # Best for WhatsApp
 
+    # OpenAI TTS Configuration
+    OPENAI_TTS_MODEL: str = "gpt-4o-mini-tts"  # gpt-4o-mini-tts, tts-1, tts-1-hd
+    OPENAI_TTS_VOICE: str = "coral"  # Default voice (13 options available)
+    OPENAI_TTS_INSTRUCTIONS: str = "Fale em português brasileiro de forma natural, amigável e profissional."
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
