@@ -1,8 +1,20 @@
 'use client';
 
 import { Node } from 'reactflow';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, Volume2, MessageSquare } from 'lucide-react';
 import { FlowNodeData } from './nodes';
+
+// Vozes disponíveis do ElevenLabs
+const AVAILABLE_VOICES = [
+  { id: '', label: 'Padrão do sistema' },
+  { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel (Feminina, calma)' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella (Feminina, suave)' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', label: 'Elli (Feminina, jovem)' },
+  { id: 'ErXwobaYiN019PkySvjV', label: 'Antoni (Masculino, amigável)' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', label: 'Josh (Masculino, grave)' },
+  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam (Masculino, profundo)' },
+  { id: '29vD33N1CtxCmqQRPOHJ', label: 'Drew (Masculino, confiante)' },
+];
 
 interface NodeEditorPanelProps {
   node: Node<FlowNodeData>;
@@ -123,6 +135,8 @@ export function NodeEditorPanel({
           Use {'{nome}'} para personalizar com o nome do cliente
         </p>
       </div>
+
+      {renderResponseTypeSelector()}
     </div>
   );
 
@@ -202,6 +216,8 @@ export function NodeEditorPanel({
           />
         </div>
       )}
+
+      {renderResponseTypeSelector()}
     </div>
   );
 
@@ -304,6 +320,8 @@ export function NodeEditorPanel({
           Use {'{nome}'}, {'{email}'}, etc. para personalizar
         </p>
       </div>
+
+      {renderResponseTypeSelector()}
     </div>
   );
 
@@ -426,6 +444,8 @@ export function NodeEditorPanel({
           Notificar equipe
         </label>
       </div>
+
+      {renderResponseTypeSelector()}
     </div>
   );
 
@@ -500,6 +520,76 @@ export function NodeEditorPanel({
           placeholder="Vou agendar uma reunião para você..."
         />
       </div>
+    </div>
+  );
+
+  // ==================== RESPONSE TYPE SELECTOR ====================
+  const renderResponseTypeSelector = () => (
+    <div className="space-y-3 rounded-lg border border-purple-200 bg-purple-50 p-3">
+      <div className="flex items-center gap-2">
+        <Volume2 className="h-4 w-4 text-purple-600" />
+        <span className="text-sm font-medium text-purple-800">Tipo de Resposta</span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => updateField('response_type', 'text')}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+            (data.config?.response_type || 'text') === 'text'
+              ? 'bg-purple-600 text-white'
+              : 'bg-white text-purple-700 hover:bg-purple-100'
+          }`}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          Texto
+        </button>
+        <button
+          type="button"
+          onClick={() => updateField('response_type', 'audio')}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+            data.config?.response_type === 'audio'
+              ? 'bg-purple-600 text-white'
+              : 'bg-white text-purple-700 hover:bg-purple-100'
+          }`}
+        >
+          <Volume2 className="h-3.5 w-3.5" />
+          Áudio
+        </button>
+        <button
+          type="button"
+          onClick={() => updateField('response_type', 'both')}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+            data.config?.response_type === 'both'
+              ? 'bg-purple-600 text-white'
+              : 'bg-white text-purple-700 hover:bg-purple-100'
+          }`}
+        >
+          Ambos
+        </button>
+      </div>
+
+      {(data.config?.response_type === 'audio' || data.config?.response_type === 'both') && (
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-purple-700">
+            Voz (ElevenLabs)
+          </label>
+          <select
+            value={data.config?.voice_id || ''}
+            onChange={(e) => updateField('voice_id', e.target.value)}
+            className="w-full rounded-lg border border-purple-200 bg-white px-3 py-2 text-xs focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+          >
+            {AVAILABLE_VOICES.map((voice) => (
+              <option key={voice.id} value={voice.id}>
+                {voice.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-purple-600">
+            O áudio será enviado como mensagem de voz no WhatsApp
+          </p>
+        </div>
+      )}
     </div>
   );
 

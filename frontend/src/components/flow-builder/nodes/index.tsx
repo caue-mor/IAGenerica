@@ -43,6 +43,11 @@ export interface FlowNodeData {
     tipo_acao?: string;
     url?: string;
     method?: string;
+    // Audio/TTS settings (ElevenLabs)
+    response_type?: 'text' | 'audio' | 'both';
+    voice_id?: string;
+    voice_stability?: number;
+    voice_similarity?: number;
   };
 }
 
