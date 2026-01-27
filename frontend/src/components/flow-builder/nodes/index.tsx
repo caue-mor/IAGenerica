@@ -48,6 +48,7 @@ export interface FlowNodeData {
     voice_id?: string;
     voice_stability?: number;
     voice_similarity?: number;
+    custom_voice?: boolean;
   };
 }
 

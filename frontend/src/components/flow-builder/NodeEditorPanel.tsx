@@ -7,6 +7,7 @@ import { FlowNodeData } from './nodes';
 // Vozes disponíveis do ElevenLabs
 const AVAILABLE_VOICES = [
   { id: '', label: 'Padrão do sistema' },
+  { id: 'xPnmQf6Ow3GGYWWURFPi', label: '⭐ Paula (Português, conversacional)' },
   { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel (Feminina, calma)' },
   { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella (Feminina, suave)' },
   { id: 'MF3mGyEYCl7XYWbV9V6O', label: 'Elli (Feminina, jovem)' },
@@ -14,6 +15,7 @@ const AVAILABLE_VOICES = [
   { id: 'TxGEqnHWrfWFTfGW9XjX', label: 'Josh (Masculino, grave)' },
   { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam (Masculino, profundo)' },
   { id: '29vD33N1CtxCmqQRPOHJ', label: 'Drew (Masculino, confiante)' },
+  { id: 'custom', label: '🔧 Usar ID personalizado...' },
 ];
 
 interface NodeEditorPanelProps {
@@ -575,16 +577,44 @@ export function NodeEditorPanel({
             Voz (ElevenLabs)
           </label>
           <select
-            value={data.config?.voice_id || ''}
-            onChange={(e) => updateField('voice_id', e.target.value)}
+            value={
+              AVAILABLE_VOICES.some(v => v.id === data.config?.voice_id)
+                ? data.config?.voice_id || ''
+                : 'custom'
+            }
+            onChange={(e) => {
+              if (e.target.value === 'custom') {
+                updateField('voice_id', '');
+                updateField('custom_voice', true);
+              } else {
+                updateField('voice_id', e.target.value);
+                updateField('custom_voice', false);
+              }
+            }}
             className="w-full rounded-lg border border-purple-200 bg-white px-3 py-2 text-xs focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
           >
             {AVAILABLE_VOICES.map((voice) => (
-              <option key={voice.id} value={voice.id}>
+              <option key={voice.id || 'custom'} value={voice.id}>
                 {voice.label}
               </option>
             ))}
           </select>
+
+          {(data.config?.custom_voice || (data.config?.voice_id && !AVAILABLE_VOICES.some(v => v.id === data.config?.voice_id))) && (
+            <div className="mt-2">
+              <label className="block text-xs font-medium text-purple-700 mb-1">
+                ID da Voz Personalizada
+              </label>
+              <input
+                type="text"
+                value={data.config?.voice_id || ''}
+                onChange={(e) => updateField('voice_id', e.target.value)}
+                placeholder="Ex: xPnmQf6Ow3GGYWWURFPi"
+                className="w-full rounded-lg border border-purple-200 bg-white px-3 py-2 text-xs focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 font-mono"
+              />
+            </div>
+          )}
+
           <p className="text-xs text-purple-600">
             O áudio será enviado como mensagem de voz no WhatsApp
           </p>
