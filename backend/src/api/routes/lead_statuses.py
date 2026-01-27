@@ -12,9 +12,9 @@ router = APIRouter(prefix="/lead-statuses", tags=["lead-statuses"])
 
 @router.get("/{company_id}")
 async def get_lead_statuses(company_id: int):
-    """Get all lead statuses for a company"""
+    """Get all lead statuses for a company - returns array directly"""
     statuses = await db.get_lead_statuses(company_id)
-    return {"statuses": statuses}
+    return statuses  # Return array directly for frontend compatibility
 
 
 @router.post("")

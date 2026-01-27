@@ -17,9 +17,9 @@ async def list_leads(
     company_id: int = Query(..., description="Company ID"),
     status_id: Optional[int] = Query(None, description="Filter by status")
 ):
-    """List all leads for a company"""
+    """List all leads for a company - returns array directly"""
     leads = await db.list_leads(company_id, status_id)
-    return {"leads": leads, "total": len(leads)}
+    return leads  # Return array directly for frontend compatibility
 
 
 @router.get("/{lead_id}")
