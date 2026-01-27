@@ -898,12 +898,17 @@ async def invoke_agent(
         current_node_id=conversation.current_node_id
     )
 
-    # Load pending_field from conversation context
+    # Load pending_field and flow_completed from conversation context
     conv_context = conversation.context or {}
     if conv_context.get("pending_field"):
         state["pending_field"] = conv_context.get("pending_field")
         state["pending_question"] = conv_context.get("pending_question")
         logger.info(f"[AGENT] Loaded pending_field from context: {state['pending_field']}")
+
+    # Load flow_completed status
+    if conv_context.get("flow_completed"):
+        state["flow_completed"] = True
+        logger.info(f"[AGENT] Flow was previously completed")
 
     # Update AI enabled status
     state["ai_enabled"] = conversation.ai_enabled and lead.ai_enabled
@@ -935,18 +940,31 @@ async def invoke_agent(
     result = await graph.invoke(state)
 
     # Update conversation node in database
+    # IMPORTANT: Don't save None - keep the current node to avoid resetting on restart
     new_node_id = result.get("current_node_id")
-    if new_node_id != conversation.current_node_id:
+    flow_completed = result.get("flow_completed", False)
+
+    if new_node_id and new_node_id != conversation.current_node_id:
+        # Only update if we have a valid new node
         await db.update_conversation_node(conversation.id, new_node_id)
+        logger.info(f"[AGENT] Updated current_node_id: {new_node_id}")
+    elif flow_completed:
+        # Flow explicitly completed - we can clear the node
+        await db.update_conversation_node(conversation.id, None)
+        logger.info(f"[AGENT] Flow completed, cleared current_node_id")
+    else:
+        # Keep the current node (don't reset to None)
+        logger.info(f"[AGENT] Keeping current_node_id: {conversation.current_node_id}")
 
     # Save pending_field to conversation context
     new_context = {
         "pending_field": result.get("pending_field"),
         "pending_question": result.get("pending_question"),
-        "collected_fields": result.get("collected_fields", {})
+        "collected_fields": result.get("collected_fields", {}),
+        "flow_completed": flow_completed
     }
     await db.update_conversation_context(conversation.id, new_context)
-    logger.info(f"[AGENT] Saved context: pending_field={new_context.get('pending_field')}")
+    logger.info(f"[AGENT] Saved context: pending_field={new_context.get('pending_field')}, flow_completed={flow_completed}")
 
     # Return formatted result
     return {
