@@ -29,23 +29,23 @@ class DatabaseService:
 
     async def get_company(self, company_id: int) -> Optional[Company]:
         """Get company by ID"""
-        response = supabase.table(COMPANIES_TABLE).select("*").eq("id", company_id).single().execute()
-        if response.data:
-            return Company(**response.data)
+        response = supabase.table(COMPANIES_TABLE).select("*").eq("id", company_id).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Company(**response.data[0])
         return None
 
     async def get_company_by_whatsapp(self, whatsapp_numero: str) -> Optional[Company]:
         """Get company by WhatsApp number"""
-        response = supabase.table(COMPANIES_TABLE).select("*").eq("whatsapp_numero", whatsapp_numero).single().execute()
-        if response.data:
-            return Company(**response.data)
+        response = supabase.table(COMPANIES_TABLE).select("*").eq("whatsapp_numero", whatsapp_numero).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Company(**response.data[0])
         return None
 
     async def get_company_by_token(self, token: str) -> Optional[Company]:
         """Get company by UAZAPI token"""
-        response = supabase.table(COMPANIES_TABLE).select("*").eq("uazapi_token", token).single().execute()
-        if response.data:
-            return Company(**response.data)
+        response = supabase.table(COMPANIES_TABLE).select("*").eq("uazapi_token", token).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Company(**response.data[0])
         return None
 
     async def list_companies(self) -> list[Company]:
@@ -98,9 +98,9 @@ class DatabaseService:
         """Get default status for a company"""
         response = supabase.table(LEAD_STATUSES_TABLE).select("*").eq(
             "company_id", company_id
-        ).eq("is_default", True).single().execute()
-        if response.data:
-            return LeadStatus(**response.data)
+        ).eq("is_default", True).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return LeadStatus(**response.data[0])
         return None
 
     async def create_lead_status(self, company_id: int, nome: str, cor: str = "#6B7280", ordem: int = 0) -> LeadStatus:
@@ -117,18 +117,18 @@ class DatabaseService:
 
     async def get_lead(self, lead_id: int) -> Optional[Lead]:
         """Get lead by ID"""
-        response = supabase.table(LEADS_TABLE).select("*").eq("id", lead_id).single().execute()
-        if response.data:
-            return Lead(**response.data)
+        response = supabase.table(LEADS_TABLE).select("*").eq("id", lead_id).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Lead(**response.data[0])
         return None
 
     async def get_lead_by_phone(self, company_id: int, celular: str) -> Optional[Lead]:
         """Get lead by phone number"""
         response = supabase.table(LEADS_TABLE).select("*").eq(
             "company_id", company_id
-        ).eq("celular", celular).single().execute()
-        if response.data:
-            return Lead(**response.data)
+        ).eq("celular", celular).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Lead(**response.data[0])
         return None
 
     async def list_leads(self, company_id: int, status_id: Optional[int] = None) -> list[Lead]:
@@ -225,16 +225,16 @@ class DatabaseService:
 
     async def get_conversation(self, conversation_id: int) -> Optional[Conversation]:
         """Get conversation by ID"""
-        response = supabase.table(CONVERSATIONS_TABLE).select("*").eq("id", conversation_id).single().execute()
-        if response.data:
-            return Conversation(**response.data)
+        response = supabase.table(CONVERSATIONS_TABLE).select("*").eq("id", conversation_id).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Conversation(**response.data[0])
         return None
 
     async def get_conversation_by_thread(self, thread_id: str) -> Optional[Conversation]:
         """Get conversation by thread ID"""
-        response = supabase.table(CONVERSATIONS_TABLE).select("*").eq("thread_id", thread_id).single().execute()
-        if response.data:
-            return Conversation(**response.data)
+        response = supabase.table(CONVERSATIONS_TABLE).select("*").eq("thread_id", thread_id).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Conversation(**response.data[0])
         return None
 
     async def get_active_conversation(self, lead_id: int) -> Optional[Conversation]:
@@ -324,9 +324,9 @@ class DatabaseService:
 
     async def get_message(self, message_id: int) -> Optional[Message]:
         """Get message by ID"""
-        response = supabase.table(MESSAGES_TABLE).select("*").eq("id", message_id).single().execute()
-        if response.data:
-            return Message(**response.data)
+        response = supabase.table(MESSAGES_TABLE).select("*").eq("id", message_id).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return Message(**response.data[0])
         return None
 
     async def list_messages(self, conversation_id: int, limit: int = 50) -> list[Message]:
