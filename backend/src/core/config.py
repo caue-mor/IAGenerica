@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # Buffer (Message Debouncing)
+    BUFFER_DEBOUNCE_SECONDS: float = 7.0  # Wait 7 seconds before processing
+    BUFFER_MAX_SIZE: int = 50  # Max messages before forcing processing
+
     class Config:
         env_file = str(ENV_FILE)
         env_file_encoding = "utf-8"

@@ -8,6 +8,7 @@ from typing import Any, Optional
 from datetime import datetime, timedelta
 from langchain_core.tools import tool
 from ...services.database import db
+from ...services.followup_scheduler import followup_scheduler, FollowupType
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,29 @@ async def schedule_followup(
         await db.update_lead_field(lead_id, "followups", existing_followups)
         await db.update_lead_field(lead_id, "next_followup_at", scheduled_datetime.isoformat())
 
-        logger.info(f"[TOOL] schedule_followup - SUCCESS - scheduled for {scheduled_datetime.isoformat()}")
+        # Register with follow-up scheduler service for automatic sending
+        type_map = {
+            "general": FollowupType.CUSTOM,
+            "reminder": FollowupType.REMINDER,
+            "proposal": FollowupType.PROPOSAL,
+            "negotiation": FollowupType.CUSTOM,
+            "check_in": FollowupType.REMINDER,
+            "reengagement": FollowupType.REENGAGEMENT,
+            "qualification": FollowupType.QUALIFICATION
+        }
+
+        scheduled_followup = await followup_scheduler.schedule_followup(
+            company_id=lead.company_id,
+            lead_id=lead_id,
+            message=message,
+            scheduled_for=scheduled_datetime,
+            followup_type=type_map.get(followup_type, FollowupType.CUSTOM),
+            metadata={"notes": notes, "tool_scheduled": True}
+        )
+
+        followup_data["scheduler_id"] = scheduled_followup.id
+
+        logger.info(f"[TOOL] schedule_followup - SUCCESS - scheduled for {scheduled_datetime.isoformat()} (scheduler ID: {scheduled_followup.id})")
 
         return {
             "success": True,

@@ -8,6 +8,11 @@ from typing import Any, Optional
 from datetime import datetime
 from langchain_core.tools import tool
 from ...services.database import db
+from ...services.notification import (
+    notification_service,
+    NotificationType,
+    NotificationPriority
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,25 @@ async def transfer_to_human(
         await db.update_lead_field(lead_id, "transfer_reason", reason)
         await db.update_lead_field(lead_id, "transfer_priority", priority)
         await db.update_lead_field(lead_id, "transfer_requested_at", datetime.utcnow().isoformat())
+
+        # Get lead info for notification
+        lead = await db.get_lead(lead_id)
+        conversation = await db.get_conversation(conversation_id)
+
+        # Send notification via NotificationService
+        priority_map = {
+            "low": NotificationPriority.LOW,
+            "normal": NotificationPriority.NORMAL,
+            "high": NotificationPriority.HIGH,
+            "urgent": NotificationPriority.URGENT
+        }
+
+        await notification_service.notify_handoff(
+            company_id=conversation.company_id if conversation else 0,
+            lead_id=lead_id,
+            lead_name=lead.nome if lead else None,
+            reason=reason
+        )
 
         logger.info(f"[TOOL] transfer_to_human - SUCCESS - AI disabled for conv {conversation_id}")
 
@@ -115,8 +139,47 @@ async def notify_team(
     try:
         logger.info(f"[TOOL] notify_team - company={company_id}, lead={lead_id}, type={notification_type}")
 
-        # Save notification in lead data
+        # Map notification types
+        type_map = {
+            "new_lead": NotificationType.NEW_LEAD,
+            "hot_lead": NotificationType.LEAD_QUALIFIED,
+            "qualified": NotificationType.LEAD_QUALIFIED,
+            "urgent": NotificationType.URGENT,
+            "follow_up": NotificationType.FOLLOW_UP_NEEDED,
+            "proposal": NotificationType.PROPOSAL_REQUESTED,
+            "document": NotificationType.DOCUMENT_RECEIVED,
+            "closed": NotificationType.INFO,
+            "error": NotificationType.ERROR
+        }
+
+        priority_map = {
+            "low": NotificationPriority.LOW,
+            "normal": NotificationPriority.NORMAL,
+            "high": NotificationPriority.HIGH,
+            "urgent": NotificationPriority.URGENT
+        }
+
+        # Get lead info for notification
+        lead = await db.get_lead(lead_id)
+
+        # Send notification via NotificationService
+        notification = await notification_service.send_notification(
+            company_id=company_id,
+            notification_type=type_map.get(notification_type, NotificationType.INFO),
+            title=f"Alerta: {notification_type}",
+            message=message,
+            lead_id=lead_id,
+            data={
+                "lead_name": lead.nome if lead else None,
+                "lead_phone": lead.celular if lead else None,
+                **(data or {})
+            },
+            priority=priority_map.get(priority, NotificationPriority.NORMAL)
+        )
+
+        # Save notification reference in lead data
         notification_info = {
+            "notification_id": notification.id,
             "type": notification_type,
             "message": message,
             "priority": priority,
@@ -126,13 +189,7 @@ async def notify_team(
 
         await db.update_lead_field(lead_id, f"notification_{notification_type}", notification_info)
 
-        # TODO: In production, implement actual notification delivery:
-        # - Send email to team
-        # - Send webhook to external systems
-        # - Push notification to mobile app
-        # - Post to Slack/Discord channel
-
-        logger.info(f"[TOOL] notify_team - SUCCESS - {notification_type} notification created")
+        logger.info(f"[TOOL] notify_team - SUCCESS - {notification_type} notification created (ID: {notification.id})")
 
         return {
             "success": True,

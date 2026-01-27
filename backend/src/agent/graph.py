@@ -24,10 +24,11 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 
 from ..core.config import settings
-from ..models import Company, Lead, Conversation, FlowConfig, FlowNode, NodeType
+from ..models import Company, Lead, LeadUpdate, Conversation, FlowConfig, FlowNode, NodeType
 from ..services.database import db
 from ..services.elevenlabs import elevenlabs, ElevenLabsService
 from ..services.openai_tts import openai_tts, OpenAITTSService
+from ..services.notification import notification_service
 from ..flow.executor import FlowExecutor
 from ..flow.humanizer import ConversationalQuestionHandler, HumanizerContext
 from ..flow.extractor import extractor, ExtractionConfidence
@@ -385,6 +386,15 @@ class ConversationGraph:
             await db.set_conversation_ai(state["conversation_id"], False)
             await db.set_lead_ai(state["lead_id"], False)
 
+            # Send handoff notification to team
+            await notification_service.notify_handoff(
+                company_id=state["company_id"],
+                lead_id=state["lead_id"],
+                lead_name=state.get("lead_name"),
+                reason=config.get("motivo", "Fluxo concluido")
+            )
+            logger.info(f"[FLOW] Handoff notification sent for lead {state['lead_id']}")
+
         elif node_type == "ACTION":
             # Execute action (handled by FlowExecutor)
             executor = FlowExecutor(flow_config)
@@ -405,7 +415,45 @@ class ConversationGraph:
                 return await self._flow_executor_node({**state, **result})
 
         elif node_type == "FOLLOWUP":
-            # Schedule follow-up
+            # Schedule follow-up using the scheduler service
+            from ..services.followup_scheduler import followup_scheduler, FollowupType
+
+            delay_hours = config.get("delay_hours", 24)
+            delay_minutes = config.get("delay_minutes")
+            followup_message = self._process_template(
+                config.get("mensagem", "Ola! Passando para saber se posso ajudar com mais alguma coisa."),
+                lead_data
+            )
+            followup_type_str = config.get("tipo", "reminder")
+
+            type_map = {
+                "reminder": FollowupType.REMINDER,
+                "reengagement": FollowupType.REENGAGEMENT,
+                "qualification": FollowupType.QUALIFICATION,
+                "proposal": FollowupType.PROPOSAL,
+                "confirmation": FollowupType.CONFIRMATION,
+                "custom": FollowupType.CUSTOM
+            }
+
+            scheduled_followup = await followup_scheduler.schedule_followup(
+                company_id=state["company_id"],
+                lead_id=state["lead_id"],
+                message=followup_message,
+                delay_hours=delay_hours if not delay_minutes else None,
+                delay_minutes=delay_minutes,
+                followup_type=type_map.get(followup_type_str, FollowupType.REMINDER),
+                metadata={
+                    "node_id": current_node_id,
+                    "flow_scheduled": True
+                }
+            )
+
+            logger.info(f"[FLOW] Follow-up scheduled: ID={scheduled_followup.id}, delay={delay_hours}h/{delay_minutes}m")
+
+            # Optionally send confirmation message
+            if config.get("confirmar", False):
+                result["response"] = config.get("mensagem_confirmacao", "Entendido! Entrarei em contato novamente em breve.")
+
             result["current_node_id"] = node.get("next_node_id")
 
         logger.info(f"[FLOW] Result: response={result.get('response', '')[:50]}..., next_node={result.get('current_node_id')}")
@@ -898,17 +946,44 @@ async def invoke_agent(
         current_node_id=conversation.current_node_id
     )
 
-    # Load pending_field and flow_completed from conversation context
+    # Load full context from conversation (Memory/FlowContext)
     conv_context = conversation.context or {}
+
+    # Restore pending field state
     if conv_context.get("pending_field"):
         state["pending_field"] = conv_context.get("pending_field")
         state["pending_question"] = conv_context.get("pending_question")
         logger.info(f"[AGENT] Loaded pending_field from context: {state['pending_field']}")
 
-    # Load flow_completed status
+    # Restore flow state
     if conv_context.get("flow_completed"):
         state["flow_completed"] = True
         logger.info(f"[AGENT] Flow was previously completed")
+
+    # Restore collected_fields from context (session data)
+    if conv_context.get("collected_fields"):
+        state["collected_fields"] = conv_context.get("collected_fields", {})
+        logger.info(f"[AGENT] Loaded collected_fields from context: {list(state['collected_fields'].keys())}")
+
+    # Restore nodes_visited for flow tracking
+    if conv_context.get("nodes_visited"):
+        state["nodes_visited"] = conv_context.get("nodes_visited", [])
+        logger.info(f"[AGENT] Loaded nodes_visited from context: {len(state['nodes_visited'])} nodes")
+
+    # Restore qualification state
+    if conv_context.get("qualification_stage"):
+        state["qualification_stage"] = conv_context.get("qualification_stage", "initial")
+        state["qualification_score"] = conv_context.get("qualification_score", 0)
+        state["qualification_reasons"] = conv_context.get("qualification_reasons", [])
+        logger.info(f"[AGENT] Loaded qualification: stage={state['qualification_stage']}, score={state['qualification_score']}")
+
+    # Restore additional context
+    if conv_context.get("user_intent"):
+        state["user_intent"] = conv_context.get("user_intent")
+    if conv_context.get("sentiment"):
+        state["sentiment"] = conv_context.get("sentiment")
+    if conv_context.get("conversation_summary"):
+        state["conversation_summary"] = conv_context.get("conversation_summary")
 
     # Update AI enabled status
     state["ai_enabled"] = conversation.ai_enabled and lead.ai_enabled
@@ -956,15 +1031,52 @@ async def invoke_agent(
         # Keep the current node (don't reset to None)
         logger.info(f"[AGENT] Keeping current_node_id: {conversation.current_node_id}")
 
-    # Save pending_field to conversation context
+    # Sync collected_fields to lead.dados_coletados for persistence
+    collected_fields = result.get("collected_fields", {})
+    if collected_fields:
+        # Merge with existing lead data
+        existing_data = lead.dados_coletados or {}
+        merged_data = {**existing_data, **collected_fields}
+
+        # Update lead in database with merged data
+        if merged_data != existing_data:
+            await db.update_lead(lead.id, LeadUpdate(dados_coletados=merged_data))
+            logger.info(f"[AGENT] Synced collected_fields to lead.dados_coletados: {list(collected_fields.keys())}")
+
+    # Save complete flow context to conversation (Memory/FlowContext)
     new_context = {
+        # Flow state
         "pending_field": result.get("pending_field"),
         "pending_question": result.get("pending_question"),
         "collected_fields": result.get("collected_fields", {}),
-        "flow_completed": flow_completed
+        "nodes_visited": result.get("nodes_visited", []),
+        "flow_completed": flow_completed,
+
+        # Qualification state
+        "qualification_stage": result.get("qualification_stage", "initial"),
+        "qualification_score": result.get("qualification_score", 0),
+        "qualification_reasons": result.get("qualification_reasons", []),
+
+        # Conversation context
+        "user_intent": result.get("user_intent"),
+        "sentiment": result.get("sentiment"),
+        "conversation_summary": result.get("conversation_summary"),
+
+        # Handoff state
+        "requires_human": result.get("requires_human", False),
+        "handoff_reason": result.get("handoff_reason"),
+        "handoff_requested_at": result.get("handoff_requested_at"),
+
+        # Metadata
+        "last_node_type": result.get("last_node_type"),
+        "last_response_type": result.get("response_type", "text"),
+        "updated_at": datetime.utcnow().isoformat()
     }
     await db.update_conversation_context(conversation.id, new_context)
-    logger.info(f"[AGENT] Saved context: pending_field={new_context.get('pending_field')}, flow_completed={flow_completed}")
+    logger.info(f"[AGENT] Saved full context: pending_field={new_context.get('pending_field')}, "
+               f"collected={len(new_context.get('collected_fields', {}))}, "
+               f"visited={len(new_context.get('nodes_visited', []))}, "
+               f"flow_completed={flow_completed}")
 
     # Return formatted result
     return {
