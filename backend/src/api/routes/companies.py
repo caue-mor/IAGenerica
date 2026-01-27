@@ -71,15 +71,29 @@ async def get_company_flow(company_id: int):
 @router.put("/{company_id}/flow")
 async def update_company_flow(company_id: int, flow_config: dict[str, Any]):
     """Update company flow configuration"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     company = await db.get_company(company_id)
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
+    # Log received payload for debugging
+    logger.info(f"Received flow_config: {flow_config}")
+
     # Validate flow config
     try:
+        # Ensure nodes have config if missing
+        if "nodes" in flow_config:
+            for node in flow_config["nodes"]:
+                if "config" not in node or node["config"] is None:
+                    node["config"] = {}
+
         config = FlowConfig(**flow_config)
+        logger.info(f"Validated flow config: {config.start_node_id}, {len(config.nodes)} nodes")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid flow config: {e}")
+        logger.exception(f"Flow config validation error: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid flow config: {str(e)}")
 
     updated = await db.update_company_flow(company_id, config)
     return {"flow_config": updated.flow_config}

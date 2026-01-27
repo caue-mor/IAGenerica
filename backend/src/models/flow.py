@@ -11,54 +11,54 @@ class NodeType(str, Enum):
     """Extended flow node types - 25+ types for complete automation"""
 
     # ============ BASICOS (existentes) ============
-    GREETING = "greeting"
-    QUESTION = "question"
-    CONDITION = "condition"
-    MESSAGE = "message"
-    ACTION = "action"
-    HANDOFF = "handoff"
-    FOLLOWUP = "followup"
+    GREETING = "GREETING"
+    QUESTION = "QUESTION"
+    CONDITION = "CONDITION"
+    MESSAGE = "MESSAGE"
+    ACTION = "ACTION"
+    HANDOFF = "HANDOFF"
+    FOLLOWUP = "FOLLOWUP"
 
     # ============ COLETA DE DADOS ESPECIFICOS ============
-    NOME = "nome"
-    EMAIL = "email"
-    TELEFONE = "telefone"
-    CIDADE = "cidade"
-    ENDERECO = "endereco"
-    CPF = "cpf"
-    DATA_NASCIMENTO = "data_nascimento"
+    NOME = "NOME"
+    EMAIL = "EMAIL"
+    TELEFONE = "TELEFONE"
+    CIDADE = "CIDADE"
+    ENDERECO = "ENDERECO"
+    CPF = "CPF"
+    DATA_NASCIMENTO = "DATA_NASCIMENTO"
 
     # ============ QUALIFICACAO ============
-    QUALIFICATION = "qualification"
-    INTERESSE = "interesse"
-    ORCAMENTO = "orcamento"
-    URGENCIA = "urgencia"
+    QUALIFICATION = "QUALIFICATION"
+    INTERESSE = "INTERESSE"
+    ORCAMENTO = "ORCAMENTO"
+    URGENCIA = "URGENCIA"
 
     # ============ ACOES COMERCIAIS ============
-    PROPOSTA = "proposta"
-    NEGOCIACAO = "negociacao"
-    AGENDAMENTO = "agendamento"
-    VISITA = "visita"
+    PROPOSTA = "PROPOSTA"
+    NEGOCIACAO = "NEGOCIACAO"
+    AGENDAMENTO = "AGENDAMENTO"
+    VISITA = "VISITA"
 
     # ============ NOTIFICACOES ============
-    NOTIFICACAO = "notificacao"
-    ALERTA = "alerta"
+    NOTIFICACAO = "NOTIFICACAO"
+    ALERTA = "ALERTA"
 
     # ============ MIDIA ============
-    FOTO = "foto"
-    DOCUMENTO = "documento"
-    AUDIO = "audio"
-    VIDEO = "video"
+    FOTO = "FOTO"
+    DOCUMENTO = "DOCUMENTO"
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
 
     # ============ INTEGRACOES ============
-    WEBHOOK_CALL = "webhook_call"
-    API_INTEGRATION = "api_integration"
+    WEBHOOK_CALL = "WEBHOOK_CALL"
+    API_INTEGRATION = "API_INTEGRATION"
 
     # ============ CONTROLE DE FLUXO ============
-    DELAY = "delay"
-    LOOP = "loop"
-    SWITCH = "switch"
-    END = "end"
+    DELAY = "DELAY"
+    LOOP = "LOOP"
+    SWITCH = "SWITCH"
+    END = "END"
 
 
 class FieldType(str, Enum):
@@ -146,6 +146,9 @@ class MediaType(str, Enum):
 
 class ValidationRule(BaseModel):
     """Validation rule for field input"""
+
+    model_config = {"extra": "allow"}
+
     type: str  # regex, min_length, max_length, min_value, max_value, custom
     value: Any
     error_message: Optional[str] = None
@@ -154,7 +157,9 @@ class ValidationRule(BaseModel):
 # ============ NODE CONFIGURATIONS ============
 
 class NodeConfig(BaseModel):
-    """Extended node configuration for all node types"""
+    """Extended node configuration for all node types - FLEXIBLE to accept frontend data"""
+
+    model_config = {"extra": "allow"}  # Allow extra fields from frontend
 
     # ---- GREETING / MESSAGE ----
     mensagem: Optional[str] = None
@@ -164,24 +169,24 @@ class NodeConfig(BaseModel):
     # ---- QUESTION / DATA COLLECTION ----
     pergunta: Optional[str] = None
     campo_destino: Optional[str] = None
-    tipo_campo: Optional[FieldType] = None
+    tipo_campo: Optional[str] = None  # Accept string (text, number, email, etc)
     opcoes: Optional[List[str]] = None  # for SELECT type
     validacao: Optional[str] = None
     validacao_rules: Optional[List[ValidationRule]] = None
     mensagem_erro: Optional[str] = None
     max_retries: Optional[int] = 3
-    obrigatorio: bool = True
+    obrigatorio: Optional[bool] = True
     valor_padrao: Optional[Any] = None
     placeholder: Optional[str] = None
 
     # ---- CONDITION ----
     campo: Optional[str] = None
-    operador: Optional[Operator] = None
+    operador: Optional[str] = None  # Accept string (equals, not_equals, etc)
     valor: Optional[Any] = None
     expressao: Optional[str] = None  # Para condicoes complexas
 
     # ---- ACTION ----
-    tipo_acao: Optional[ActionType] = None
+    tipo_acao: Optional[str] = None  # Accept string (webhook, api_call, etc)
     url: Optional[str] = None
     method: Optional[str] = "POST"
     headers: Optional[Dict[str, str]] = None
@@ -189,12 +194,12 @@ class NodeConfig(BaseModel):
     novo_status_id: Optional[int] = None
     tags: Optional[List[str]] = None
     timeout_seconds: Optional[int] = 30
-    retry_on_fail: bool = False
+    retry_on_fail: Optional[bool] = False
 
     # ---- HANDOFF ----
     motivo: Optional[str] = None
     mensagem_cliente: Optional[str] = None
-    notificar_equipe: bool = True
+    notificar_equipe: Optional[bool] = True
     departamento: Optional[str] = None
     prioridade: Optional[str] = "normal"
 
@@ -224,11 +229,11 @@ class NodeConfig(BaseModel):
     # ---- NOTIFICACAO / ALERTA ----
     canal_notificacao: Optional[str] = None  # email, sms, whatsapp, slack
     destinatarios: Optional[List[str]] = None
-    nivel_urgencia: Optional[UrgencyLevel] = None
+    nivel_urgencia: Optional[str] = None  # Accept string
     template_notificacao: Optional[str] = None
 
     # ---- MEDIA ----
-    tipo_midia: Optional[MediaType] = None
+    tipo_midia: Optional[str] = None  # Accept string
     url_midia: Optional[str] = None
     caption: Optional[str] = None
     aceitar_tipos: Optional[List[str]] = None  # Para upload
@@ -249,11 +254,14 @@ class NodeConfig(BaseModel):
 
 
 class FlowNode(BaseModel):
-    """Flow node definition"""
+    """Flow node definition - FLEXIBLE to accept frontend data"""
+
+    model_config = {"extra": "allow"}
+
     id: str
-    type: NodeType
+    type: str  # Accept string (GREETING, QUESTION, etc) - flexible
     name: str
-    config: NodeConfig
+    config: Optional[NodeConfig] = None  # Make optional for simpler nodes
     next_node_id: Optional[str] = None
     # For CONDITION nodes
     true_node_id: Optional[str] = None
@@ -261,7 +269,7 @@ class FlowNode(BaseModel):
     # For SWITCH nodes
     case_node_ids: Optional[Dict[str, str]] = None
     # Visual position
-    position: Optional[Dict[str, float]] = None  # {x, y} for visual builder
+    position: Optional[Dict[str, Any]] = None  # {x, y} for visual builder - Any to accept int or float
     # Metadata
     group: Optional[str] = None  # Para agrupar nos visualmente
     color: Optional[str] = None
@@ -269,17 +277,22 @@ class FlowNode(BaseModel):
 
 
 class FlowEdge(BaseModel):
-    """Flow edge definition"""
+    """Flow edge definition - FLEXIBLE to accept frontend data"""
+
+    model_config = {"extra": "allow"}
+
     id: str
     source: str
     target: str
     label: Optional[str] = None
     condition: Optional[str] = None  # Para edges condicionais
-    animated: bool = False
+    animated: Optional[bool] = False
 
 
 class GlobalConfig(BaseModel):
     """Global configuration for the entire flow"""
+
+    model_config = {"extra": "allow"}
 
     # Campos obrigatorios para conversao
     campos_obrigatorios: List[str] = Field(
@@ -346,11 +359,14 @@ class GlobalConfig(BaseModel):
 
 
 class FlowConfig(BaseModel):
-    """Complete flow configuration"""
+    """Complete flow configuration - FLEXIBLE to accept frontend data"""
+
+    model_config = {"extra": "allow"}
+
     nodes: List[FlowNode]
     edges: List[FlowEdge]
     start_node_id: str
-    version: str = "2.0"
+    version: str = "1.0"  # Default to 1.0 to match frontend
 
     # Configuracoes globais
     global_config: Optional[GlobalConfig] = None
