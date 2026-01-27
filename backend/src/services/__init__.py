@@ -48,6 +48,13 @@ from .voice import (
     AudioStorage
 )
 
+# ElevenLabs TTS (simplified service)
+from .elevenlabs import (
+    elevenlabs,
+    ElevenLabsService,
+    create_elevenlabs_service
+)
+
 
 __all__ = [
     # Database
@@ -98,4 +105,9 @@ __all__ = [
     "ElevenLabsTTS",
     "AudioConverter",
     "AudioStorage",
+
+    # ElevenLabs TTS (simplified)
+    "elevenlabs",
+    "ElevenLabsService",
+    "create_elevenlabs_service",
 ]

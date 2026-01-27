@@ -26,6 +26,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from ..core.config import settings
 from ..models import Company, Lead, Conversation, FlowConfig, FlowNode, NodeType
 from ..services.database import db
+from ..services.elevenlabs import elevenlabs, ElevenLabsService
 from ..flow.executor import FlowExecutor
 from ..flow.humanizer import ConversationalQuestionHandler, HumanizerContext
 from ..flow.extractor import extractor, ExtractionConfidence
@@ -269,6 +270,10 @@ class ConversationGraph:
         # Save node type for humanizer
         result["previous_node_type"] = node_type
         result["last_node_type"] = node_type
+
+        # Save response type for audio/text output (from node config)
+        result["node_response_type"] = config.get("response_type", "text")
+        result["node_voice_id"] = config.get("voice_id")
 
         logger.info(f"[FLOW] Node type: {node_type}")
 
@@ -567,9 +572,35 @@ class ConversationGraph:
 
         logger.info(f"[HUMANIZER] Final response: {response[:100]}...")
 
+        # Check if audio response is requested
+        response_type = state.get("node_response_type", "text")
+        voice_id = state.get("node_voice_id")
+        audio_base64 = None
+
+        if response_type in ["audio", "both"] and response:
+            try:
+                # Generate audio using ElevenLabs
+                tts_service = ElevenLabsService(voice_id=voice_id) if voice_id else elevenlabs
+
+                if tts_service.is_configured():
+                    audio_base64 = await tts_service.get_audio_base64(response, voice_id)
+                    if audio_base64:
+                        logger.info(f"[HUMANIZER] Audio generated successfully ({len(audio_base64)} chars base64)")
+                    else:
+                        logger.warning("[HUMANIZER] Audio generation failed, falling back to text")
+                        response_type = "text"
+                else:
+                    logger.warning("[HUMANIZER] ElevenLabs not configured, falling back to text")
+                    response_type = "text"
+
+            except Exception as e:
+                logger.error(f"[HUMANIZER] Error generating audio: {e}")
+                response_type = "text"
+
         return {
             "response": response,
-            "response_type": "text",
+            "response_type": response_type,
+            "audio_base64": audio_base64,
             "last_message_at": datetime.utcnow().isoformat()
         }
 
@@ -888,6 +919,8 @@ async def invoke_agent(
     # Return formatted result
     return {
         "response": result.get("response", ""),
+        "response_type": result.get("response_type", "text"),
+        "audio_base64": result.get("audio_base64"),
         "ai_enabled": result.get("ai_enabled", True),
         "should_handoff": result.get("requires_human", False),
         "handoff_reason": result.get("handoff_reason"),

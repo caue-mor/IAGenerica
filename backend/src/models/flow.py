@@ -156,10 +156,23 @@ class ValidationRule(BaseModel):
 
 # ============ NODE CONFIGURATIONS ============
 
+class ResponseType(str, Enum):
+    """Response type for node output"""
+    TEXT = "text"
+    AUDIO = "audio"
+    BOTH = "both"  # Send both text and audio
+
+
 class NodeConfig(BaseModel):
     """Extended node configuration for all node types - FLEXIBLE to accept frontend data"""
 
     model_config = {"extra": "allow"}  # Allow extra fields from frontend
+
+    # ---- RESPONSE TYPE (text or audio via ElevenLabs) ----
+    response_type: Optional[str] = "text"  # text, audio, both
+    voice_id: Optional[str] = None  # ElevenLabs voice ID (optional, uses default)
+    voice_stability: Optional[float] = 0.5
+    voice_similarity: Optional[float] = 0.75
 
     # ---- GREETING / MESSAGE ----
     mensagem: Optional[str] = None

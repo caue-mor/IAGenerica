@@ -105,21 +105,55 @@ async def process_message(
                 token=company.uazapi_token
             )
 
-            # Send message
-            send_result = await wa_service.send_text(
-                to=sender_phone,
-                message=result["response"]
-            )
+            response_type = result.get("response_type", "text")
+            audio_base64 = result.get("audio_base64")
+            send_result = None
+
+            # Handle audio response (ElevenLabs TTS)
+            if response_type in ["audio", "both"] and audio_base64:
+                try:
+                    # Send audio as PTT (voice message)
+                    # UAZAPI accepts base64 audio with data URI
+                    audio_data = f"data:audio/ogg;base64,{audio_base64}"
+                    send_result = await wa_service.send_ptt(
+                        to=sender_phone,
+                        audio_url=audio_data
+                    )
+                    logger.info(f"Audio response sent to {sender_phone}")
+
+                    # For "both" mode, also send text
+                    if response_type == "both":
+                        text_result = await wa_service.send_text(
+                            to=sender_phone,
+                            message=result["response"]
+                        )
+                        logger.info(f"Text response also sent to {sender_phone}")
+
+                except Exception as e:
+                    logger.error(f"Error sending audio, falling back to text: {e}")
+                    # Fall back to text on audio error
+                    send_result = await wa_service.send_text(
+                        to=sender_phone,
+                        message=result["response"]
+                    )
+            else:
+                # Send text message
+                send_result = await wa_service.send_text(
+                    to=sender_phone,
+                    message=result["response"]
+                )
 
             # Save outbound message
+            message_type = "ptt" if response_type == "audio" and audio_base64 else "text"
             await db.save_outbound_message(
                 conversation_id=conversation.id,
                 lead_id=lead.id,
                 content=result["response"],
-                uazapi_message_id=send_result.get("message_id")
+                message_type=message_type,
+                uazapi_message_id=send_result.get("message_id") if send_result else None
             )
 
-            logger.info(f"Response sent to {sender_phone}")
+            logger.info(f"Response sent to {sender_phone} (type: {response_type})")
 
     except Exception as e:
         logger.exception(f"Error processing message: {e}")
