@@ -27,6 +27,8 @@ from ..core.config import settings
 from ..models import Company, Lead, Conversation, FlowConfig, FlowNode, NodeType
 from ..services.database import db
 from ..flow.executor import FlowExecutor
+from ..flow.humanizer import ConversationalQuestionHandler, HumanizerContext
+from ..flow.extractor import extractor, ExtractionConfidence
 from .state import (
     AgentState,
     CompanyConfig,
@@ -264,6 +266,10 @@ class ConversationGraph:
         node_type = node.get("type")
         config = node.get("config", {})
 
+        # Save node type for humanizer
+        result["previous_node_type"] = node_type
+        result["last_node_type"] = node_type
+
         logger.info(f"[FLOW] Node type: {node_type}")
 
         # Detect question-type nodes (NOME, EMAIL, TELEFONE, etc.)
@@ -455,17 +461,20 @@ class ConversationGraph:
 
     async def _humanizer_node(self, state: AgentState) -> dict[str, Any]:
         """
-        Humanizer node - final processing before response.
+        Humanizer node - CRITICAL component that transforms script into conversation.
 
         This node:
-        - Extracts the final response from messages or state
-        - Applies any final formatting
-        - Ensures response is ready for delivery
+        - Humanizes flow responses using ConversationalQuestionHandler
+        - Responds to what user said FIRST (empathy)
+        - Then asks questions naturally (not reading scripts)
+        - Applies emoji/formatting settings
         """
         logger.info("[HUMANIZER] Processing response")
 
         # Get response from state or last AI message
         response = state.get("response", "")
+        node_type = state.get("previous_node_type") or state.get("last_node_type")
+        pending_field = state.get("pending_field")
 
         if not response:
             messages = state.get("messages", [])
@@ -477,10 +486,66 @@ class ConversationGraph:
         if not response:
             response = "Como posso ajudar?"
 
-        # Apply emoji settings
+        # Get company config for humanization
         company_config = state.get("company_config", {})
-        if not company_config.get("use_emojis", False):
-            # Simple emoji removal (basic patterns)
+        agent_name = company_config.get("agent_name", "Assistente")
+        company_name = company_config.get("company_name", "nossa empresa")
+        use_emojis = company_config.get("use_emojis", False)
+        agent_tone = company_config.get("agent_tone", "friendly")
+
+        # Get user message for context
+        user_message = self._get_last_user_message(state) or ""
+
+        # Humanize flow responses (questions, greetings, messages)
+        should_humanize = (
+            pending_field or  # It's a question waiting for answer
+            node_type in ["QUESTION", "NOME", "EMAIL", "TELEFONE", "CIDADE", "GREETING", "MESSAGE"] or
+            (state.get("pending_question") and response == state.get("pending_question"))
+        )
+
+        if should_humanize and response:
+            try:
+                # Create humanizer context
+                humanizer = ConversationalQuestionHandler()
+                context = humanizer.create_context(
+                    lead_name=state.get("lead_name"),
+                    agent_name=agent_name,
+                    company_name=company_name,
+                    tone="friendly" if agent_tone == "amigavel" else agent_tone
+                )
+
+                # Get conversation history for context
+                history = []
+                for msg in state.get("messages", [])[-4:]:
+                    if isinstance(msg, HumanMessage):
+                        history.append({"role": "user", "content": msg.content})
+                    elif isinstance(msg, AIMessage):
+                        history.append({"role": "assistant", "content": msg.content})
+
+                # Humanize the response
+                field_to_collect = pending_field or node_type.lower() if node_type else "resposta"
+                retry_count = state.get("retry_count", 0)
+
+                humanized = await humanizer.humanize(
+                    user_message=user_message,
+                    conversation_history=history,
+                    field_to_collect=field_to_collect,
+                    original_question=response,
+                    context=context,
+                    retry_count=retry_count,
+                    skip_humanize=False
+                )
+
+                if humanized:
+                    response = humanized
+                    logger.info(f"[HUMANIZER] Humanized response: {response[:80]}...")
+
+            except Exception as e:
+                logger.error(f"[HUMANIZER] Error humanizing: {e}")
+                # Keep original response on error
+
+        # Apply emoji settings
+        if not use_emojis:
             import re
             emoji_pattern = re.compile(
                 "["
@@ -542,18 +607,86 @@ class ConversationGraph:
         field_type: str,
         options: Optional[list] = None
     ) -> Optional[str]:
-        """Extract a field value from user message using LLM."""
-        prompt = PromptBuilder.build_extraction_prompt(
-            user_message=user_message,
-            field_name=field_name,
-            field_type=field_type,
-            options=options
-        )
+        """
+        Extract a field value from user message.
+
+        Uses DataExtractor with regex patterns first for speed,
+        falls back to LLM for complex or ambiguous cases.
+        """
+        # Map field type to extractor field type
+        extractor_field = field_name.lower()
+
+        # Common field type mappings
+        field_mappings = {
+            "nome": "nome",
+            "name": "nome",
+            "email": "email",
+            "telefone": "telefone",
+            "phone": "telefone",
+            "celular": "celular",
+            "cpf": "cpf",
+            "cnpj": "cnpj",
+            "cep": "cep",
+            "cidade": "cidade",
+            "city": "cidade",
+            "endereco": "endereco",
+            "address": "endereco",
+            "data": "data",
+            "date": "data",
+            "data_nascimento": "data_nascimento",
+            "valor": "valor",
+            "numero": "numero"
+        }
+
+        extractor_field = field_mappings.get(field_name.lower(), field_name.lower())
 
         try:
+            # First try regex-based extraction (fast)
+            result = extractor.extract_with_details(extractor_field, user_message)
+
+            if result.success and result.confidence in [ExtractionConfidence.HIGH, ExtractionConfidence.MEDIUM]:
+                logger.info(f"[EXTRACT] Regex extracted {field_name}: {result.value} (confidence: {result.confidence.value})")
+                return result.value
+
+            # For options-based fields, check if user message matches any option
+            if options:
+                user_lower = user_message.lower().strip()
+                for opt in options:
+                    if str(opt).lower() in user_lower or user_lower in str(opt).lower():
+                        logger.info(f"[EXTRACT] Option matched for {field_name}: {opt}")
+                        return str(opt)
+
+            # Fall back to LLM for complex extraction
+            prompt = PromptBuilder.build_extraction_prompt(
+                user_message=user_message,
+                field_name=field_name,
+                field_type=field_type,
+                options=options
+            )
+
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             extracted = response.content.strip()
-            return extracted if extracted != "INVALID" else None
+
+            if extracted and extracted.upper() != "INVALID":
+                logger.info(f"[EXTRACT] LLM extracted {field_name}: {extracted}")
+                return extracted
+
+            # Last resort: if field is nome/cidade/interesse, the whole message might be the answer
+            if extractor_field in ["nome", "cidade", "interesse"] and len(user_message.strip()) >= 2:
+                cleaned = user_message.strip()
+                # Basic cleaning - remove common prefixes
+                prefixes = ["meu nome é", "me chamo", "sou o", "sou a", "pode me chamar de", "moro em", "estou em"]
+                for prefix in prefixes:
+                    if cleaned.lower().startswith(prefix):
+                        cleaned = cleaned[len(prefix):].strip()
+                        break
+
+                if cleaned and len(cleaned) >= 2:
+                    logger.info(f"[EXTRACT] Fallback extracted {field_name}: {cleaned}")
+                    return cleaned.title() if extractor_field == "nome" else cleaned
+
+            return None
+
         except Exception as e:
             logger.error(f"[EXTRACT] Error: {e}")
             return None

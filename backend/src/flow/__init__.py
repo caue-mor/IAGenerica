@@ -41,6 +41,24 @@ from .result import (
     media_request_result,
     continue_result
 )
+from .humanizer import (
+    ConversationalQuestionHandler,
+    HumanizerContext,
+    ConversationMessage,
+    FieldType as HumanizerFieldType,
+    FIELD_HINTS,
+    humanize_question
+)
+from .extractor import (
+    DataExtractor,
+    ExtractionResult,
+    ExtractionConfidence,
+    extractor,
+    extract_field,
+    is_skip,
+    validate_field,
+    create_extractor
+)
 
 __all__ = [
     # Executor
@@ -78,6 +96,24 @@ __all__ = [
     "end_result",
     "media_request_result",
     "continue_result",
+
+    # Humanizer
+    "ConversationalQuestionHandler",
+    "HumanizerContext",
+    "ConversationMessage",
+    "HumanizerFieldType",
+    "FIELD_HINTS",
+    "humanize_question",
+
+    # Extractor
+    "DataExtractor",
+    "ExtractionResult",
+    "ExtractionConfidence",
+    "extractor",
+    "extract_field",
+    "is_skip",
+    "validate_field",
+    "create_extractor",
 ]
 
 
