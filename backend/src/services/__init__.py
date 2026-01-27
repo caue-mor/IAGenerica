@@ -9,6 +9,9 @@ from .database import db, DatabaseService
 # WhatsApp integration
 from .whatsapp import whatsapp, WhatsAppService, create_whatsapp_service
 
+# UAZAPI Instance Management
+from .uazapi import uazapi, UazapiService, create_uazapi_service
+
 # Audio transcription (OpenAI Whisper)
 from .audio_transcription import audio_transcription, AudioTranscriptionService
 
@@ -55,6 +58,11 @@ __all__ = [
     "whatsapp",
     "WhatsAppService",
     "create_whatsapp_service",
+
+    # UAZAPI
+    "uazapi",
+    "UazapiService",
+    "create_uazapi_service",
 
     # Audio Transcription
     "audio_transcription",
