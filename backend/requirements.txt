@@ -1,0 +1,26 @@
+# Core
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Supabase
+supabase>=2.3.0
+
+# LangGraph & AI
+langgraph>=0.0.40
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-core>=0.1.0
+openai>=1.10.0
+
+# HTTP Client
+httpx>=0.26.0
+
+# Utils
+python-dotenv>=1.0.0
+python-multipart>=0.0.6
+
+# Optional: Redis for production checkpointing
+# redis>=5.0.0
+# langgraph-checkpoint-redis>=0.0.1
