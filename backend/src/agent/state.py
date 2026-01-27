@@ -133,8 +133,13 @@ class AgentState(TypedDict, total=False):
 
     # ==================== RESPONSE ====================
     response: str  # Final response to send
-    response_type: Literal["text", "template", "media"]
+    response_type: Literal["text", "template", "media", "audio", "both"]
     media_url: Optional[str]
+
+    # ==================== AUDIO/TTS (ElevenLabs) ====================
+    node_response_type: Optional[Literal["text", "audio", "both"]]  # Response type from flow node
+    node_voice_id: Optional[str]  # ElevenLabs voice ID from flow node
+    audio_base64: Optional[str]  # Generated audio in base64
 
     # ==================== TIMESTAMPS ====================
     session_started_at: str
@@ -247,6 +252,11 @@ def create_initial_state(
         response="",
         response_type="text",
         media_url=None,
+
+        # Audio/TTS
+        node_response_type=None,
+        node_voice_id=None,
+        audio_base64=None,
 
         # Timestamps
         session_started_at=now,
