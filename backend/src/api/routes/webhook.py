@@ -278,20 +278,10 @@ async def handle_connection_event(company_id: int, webhook: WebhookPayload):
 
         logger.info(f"Connection event for company {company_id}: status={status}, phone={phone}")
 
-        # Update company status
-        update_data = {}
-
+        # Only update phone number when connected (status is checked via UAZAPI API in real-time)
         if status == "connected" and phone:
-            update_data["whatsapp_numero"] = phone
-            update_data["whatsapp_status"] = "connected"
-        elif status in ["disconnected", "close"]:
-            update_data["whatsapp_status"] = "disconnected"
-        elif status == "connecting":
-            update_data["whatsapp_status"] = "connecting"
-
-        if update_data:
-            await db.update_company(company_id, update_data)
-            logger.info(f"Updated company {company_id} status: {update_data}")
+            await db.update_company(company_id, {"whatsapp_numero": phone})
+            logger.info(f"Updated company {company_id} phone: {phone}")
 
     except Exception as e:
         logger.exception(f"Error handling connection event: {e}")
