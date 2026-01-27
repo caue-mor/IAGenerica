@@ -138,10 +138,13 @@ async def receive_webhook(
         Acknowledgment
     """
     try:
+        # Log raw payload for debugging
+        logger.info(f"Raw webhook payload for company {company_id}: {payload}")
+
         # Parse payload
         webhook = parse_webhook(payload)
 
-        logger.info(f"Received webhook: event={webhook.event}, company={company_id}")
+        logger.info(f"Parsed webhook: event={webhook.event}, is_message={webhook.is_message_event}, sender={webhook.sender_phone}, text={webhook.message_text}")
 
         # Handle connection events
         if webhook.is_connection_event:

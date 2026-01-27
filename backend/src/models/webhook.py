@@ -89,9 +89,13 @@ class WebhookPayload(BaseModel):
     @property
     def is_message_event(self) -> bool:
         """Check if this is a message event"""
+        # If we have message data, it's likely a message event
+        if self.message or (self.data and self.data.get("message")):
+            return True
         if not self.event:
             return False
-        return self.event.lower() in ["message", "messages", "messages.upsert", "message.any"]
+        event_lower = self.event.lower()
+        return any(x in event_lower for x in ["message", "messages", "chat", "text"])
 
     @property
     def is_connection_event(self) -> bool:
