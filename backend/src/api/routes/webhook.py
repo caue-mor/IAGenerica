@@ -143,6 +143,11 @@ async def receive_webhook(
 
         logger.info(f"Received webhook: event={webhook.event}, company={company_id}")
 
+        # Handle connection events
+        if webhook.is_connection_event:
+            await handle_connection_event(company_id, webhook)
+            return {"status": "received", "event": "connection"}
+
         # Only process message events
         if not webhook.is_message_event:
             return {"status": "ignored", "reason": "not a message event"}
@@ -154,7 +159,8 @@ async def receive_webhook(
 
     except Exception as e:
         logger.exception(f"Webhook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Always return 200 to avoid retries
+        return {"status": "error", "message": str(e)}
 
 
 @router.get("/webhook/{company_id}/test")
@@ -231,18 +237,21 @@ async def receive_global_webhook(
                 except (ValueError, TypeError):
                     pass
 
+        # Parse webhook payload early
+        webhook = parse_webhook(payload)
+
+        # Try to get company_id from webhook if not found yet
+        if not company_id:
+            company_id = webhook.company_id_from_instance
+
         if not company_id:
             logger.warning(f"Could not determine company_id from payload")
             return {"status": "ignored", "reason": "company_id not found"}
 
         # Handle connection events
-        event = payload.get("event", "")
-        if event in ["connection", "connection.update"]:
-            await handle_connection_event(company_id, payload)
+        if webhook.is_connection_event:
+            await handle_connection_event(company_id, webhook)
             return {"status": "received", "event": "connection"}
-
-        # Parse and process message events
-        webhook = parse_webhook(payload)
 
         if not webhook.is_message_event:
             return {"status": "ignored", "reason": "not a message event"}
@@ -258,12 +267,11 @@ async def receive_global_webhook(
         return {"status": "error", "message": str(e)}
 
 
-async def handle_connection_event(company_id: int, payload: dict):
+async def handle_connection_event(company_id: int, webhook: WebhookPayload):
     """Handle connection status change events"""
     try:
-        instance_data = payload.get("instance", {})
-        status = instance_data.get("status", "")
-        owner = instance_data.get("owner", "")
+        status = webhook.connection_status or ""
+        owner = webhook.instance_data.owner if webhook.instance_data else ""
 
         # Extract phone number from owner (format: 5511999999999@s.whatsapp.net)
         phone = owner.replace("@s.whatsapp.net", "") if owner else None
