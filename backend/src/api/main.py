@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..core.config import settings
-from .routes import webhook_router, leads_router, companies_router, whatsapp_router
+from .routes import webhook_router, leads_router, companies_router, whatsapp_router, voice_router
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(leads_router, prefix="/api")
     app.include_router(companies_router, prefix="/api")
     app.include_router(whatsapp_router)  # WhatsApp/UAZAPI management
+    app.include_router(voice_router, prefix="/api")  # Voice/TTS service
 
     @app.get("/")
     async def root():

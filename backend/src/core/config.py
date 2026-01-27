@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     UAZAPI_ADMIN_TOKEN: Optional[str] = None
     WEBHOOK_BASE_URL: Optional[str] = None  # For webhook configuration
 
+    # Eleven Labs (Text-to-Speech)
+    ELEVEN_LABS_API_KEY: Optional[str] = None
+    ELEVEN_LABS_VOICE_ID: Optional[str] = None  # Default voice ID
+    ELEVEN_LABS_MODEL_ID: str = "eleven_multilingual_v2"
+
+    # Voice Configuration
+    VOICE_ENABLED: bool = False
+    VOICE_OUTPUT_FORMAT: str = "opus_48000_64"  # Best for WhatsApp
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000

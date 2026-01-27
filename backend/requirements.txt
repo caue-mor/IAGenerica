@@ -21,6 +21,11 @@ httpx>=0.26.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
 
+# Voice/Audio (Eleven Labs TTS)
+# Note: Requires FFmpeg system dependency for audio conversion
+# Install FFmpeg: apt-get install ffmpeg (Linux) / brew install ffmpeg (macOS)
+elevenlabs>=1.50.0
+
 # Optional: Redis for production checkpointing
 # redis>=5.0.0
 # langgraph-checkpoint-redis>=0.0.1

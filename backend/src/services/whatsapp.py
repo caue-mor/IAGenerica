@@ -735,10 +735,12 @@ class WhatsAppService:
         """
         Send an image message.
 
+        UAZAPI Endpoint: POST /send/media with type="image"
+
         Args:
             to: Phone number to send to
-            image_url: URL of the image
-            caption: Optional caption
+            image_url: URL of the image (JPG preferred)
+            caption: Optional caption (supports placeholders)
             token: UAZAPI token
 
         Returns:
@@ -752,10 +754,10 @@ class WhatsAppService:
         payload = {
             "number": self._format_phone(to),
             "type": "image",
-            "media": image_url
+            "file": image_url  # UAZAPI uses "file" not "media"
         }
         if caption:
-            payload["caption"] = caption
+            payload["text"] = caption  # UAZAPI uses "text" for caption
 
         try:
             async with httpx.AsyncClient() as client:
@@ -794,10 +796,12 @@ class WhatsAppService:
         """
         Send a document message.
 
+        UAZAPI Endpoint: POST /send/media with type="document"
+
         Args:
             to: Phone number to send to
-            document_url: URL of the document
-            filename: File name
+            document_url: URL of the document (PDF, DOCX, XLSX, etc.)
+            filename: File name to display (e.g., "Contrato.pdf")
             caption: Optional caption
             token: UAZAPI token
 
@@ -812,11 +816,11 @@ class WhatsAppService:
         payload = {
             "number": self._format_phone(to),
             "type": "document",
-            "media": document_url,
-            "filename": filename
+            "file": document_url,  # UAZAPI uses "file" not "media"
+            "docName": filename  # UAZAPI uses "docName" not "filename"
         }
         if caption:
-            payload["caption"] = caption
+            payload["text"] = caption  # UAZAPI uses "text" for caption
 
         try:
             async with httpx.AsyncClient() as client:
@@ -851,11 +855,14 @@ class WhatsAppService:
         token: Optional[str] = None
     ) -> dict[str, Any]:
         """
-        Send an audio message.
+        Send an audio message (file, not voice message).
+        For voice messages (PTT), use send_ptt() instead.
+
+        UAZAPI Endpoint: POST /send/media with type="audio"
 
         Args:
             to: Phone number to send to
-            audio_url: URL of the audio file
+            audio_url: URL of the audio file (MP3 or OGG)
             token: UAZAPI token
 
         Returns:
@@ -869,7 +876,7 @@ class WhatsAppService:
         payload = {
             "number": self._format_phone(to),
             "type": "audio",
-            "media": audio_url
+            "file": audio_url  # UAZAPI uses "file" not "media"
         }
 
         try:
@@ -897,6 +904,150 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Error sending WhatsApp audio: {e}")
             return {"success": False, "error": str(e)}
+
+    async def send_ptt(
+        self,
+        to: str,
+        audio_url: str,
+        token: Optional[str] = None,
+        delay: int = 0
+    ) -> dict[str, Any]:
+        """
+        Send a voice message (PTT - Push to Talk).
+        This appears as a voice recording in WhatsApp, not as an audio file.
+
+        UAZAPI Endpoint: POST /send/media with type="ptt"
+
+        Args:
+            to: Phone number to send to
+            audio_url: URL of the audio file (OGG format recommended)
+            token: UAZAPI token
+            delay: Delay in ms before sending (shows "Recording audio...")
+
+        Returns:
+            API response with message_id
+
+        Example:
+            await send_ptt("5511999999999", "https://storage.com/audio.ogg")
+        """
+        token = token or self.token
+        if not token:
+            return {"success": False, "error": "Token not configured"}
+
+        # UAZAPI uses /send/media endpoint with type="ptt"
+        url = f"{self.base_url}/send/media"
+        payload = {
+            "number": self._format_phone(to),
+            "type": "ptt",  # Push-to-Talk voice message
+            "file": audio_url  # URL or base64 of the audio file
+        }
+
+        # Add delay if specified (shows "Recording audio...")
+        if delay > 0:
+            payload["delay"] = delay
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=self._get_headers(token),
+                    timeout=30
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "message_id": data.get("key", {}).get("id"),
+                        "file_url": data.get("response", {}).get("fileUrl"),
+                        "data": data
+                    }
+                else:
+                    logger.error(f"UAZAPI PTT error: {response.status_code} - {response.text}")
+                    return {
+                        "success": False,
+                        "error": f"HTTP {response.status_code}: {response.text}"
+                    }
+
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp PTT: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def send_voice(
+        self,
+        to: str,
+        audio_url: str,
+        token: Optional[str] = None,
+        use_myaudio: bool = False
+    ) -> dict[str, Any]:
+        """
+        Send a voice message. Alias for send_ptt with option to use myaudio type.
+
+        Args:
+            to: Phone number to send to
+            audio_url: URL of the audio file
+            token: UAZAPI token
+            use_myaudio: If True, uses "myaudio" type instead of "ptt"
+
+        Returns:
+            API response
+        """
+        token = token or self.token
+        if not token:
+            return {"success": False, "error": "Token not configured"}
+
+        url = f"{self.base_url}/send/media"
+        payload = {
+            "number": self._format_phone(to),
+            "type": "myaudio" if use_myaudio else "ptt",
+            "file": audio_url
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=self._get_headers(token),
+                    timeout=30
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "message_id": data.get("key", {}).get("id"),
+                        "data": data
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"HTTP {response.status_code}: {response.text}"
+                    }
+
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp voice: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def send_recording(
+        self,
+        to: str,
+        audio_url: str,
+        token: Optional[str] = None
+    ) -> dict[str, Any]:
+        """
+        Alias for send_ptt. Sends audio as voice recording.
+
+        Args:
+            to: Phone number to send to
+            audio_url: URL of the audio file
+            token: UAZAPI token
+
+        Returns:
+            API response
+        """
+        return await self.send_ptt(to, audio_url, token)
 
     async def mark_as_read(
         self,

@@ -36,6 +36,15 @@ from .notification import (
     NotificationPriority
 )
 
+# Voice/TTS (Eleven Labs)
+from .voice import (
+    get_voice_service,
+    VoiceService,
+    ElevenLabsTTS,
+    AudioConverter,
+    AudioStorage
+)
+
 
 __all__ = [
     # Database
@@ -74,4 +83,11 @@ __all__ = [
     "Notification",
     "NotificationType",
     "NotificationPriority",
+
+    # Voice/TTS
+    "get_voice_service",
+    "VoiceService",
+    "ElevenLabsTTS",
+    "AudioConverter",
+    "AudioStorage",
 ]
