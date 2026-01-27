@@ -27,6 +27,7 @@ from ..core.config import settings
 from ..models import Company, Lead, Conversation, FlowConfig, FlowNode, NodeType
 from ..services.database import db
 from ..services.elevenlabs import elevenlabs, ElevenLabsService
+from ..services.openai_tts import openai_tts, OpenAITTSService
 from ..flow.executor import FlowExecutor
 from ..flow.humanizer import ConversationalQuestionHandler, HumanizerContext
 from ..flow.extractor import extractor, ExtractionConfidence
@@ -580,26 +581,50 @@ class ConversationGraph:
         logger.info(f"[HUMANIZER] Response type from state: {response_type}, voice_id: {voice_id}")
 
         if response_type in ["audio", "both"] and response:
+            # Try ElevenLabs first, then fallback to OpenAI TTS
+            audio_generated = False
+
+            # Try ElevenLabs
             try:
-                # Generate audio using ElevenLabs
                 tts_service = ElevenLabsService(voice_id=voice_id) if voice_id else elevenlabs
 
-                logger.info(f"[HUMANIZER] ElevenLabs configured: {tts_service.is_configured()}, API key present: {bool(tts_service.api_key)}")
+                logger.info(f"[HUMANIZER] Trying ElevenLabs...")
 
                 if tts_service.is_configured():
-                    logger.info(f"[HUMANIZER] Generating audio for: {response[:50]}...")
                     audio_base64 = await tts_service.get_audio_base64(response, voice_id)
                     if audio_base64:
-                        logger.info(f"[HUMANIZER] Audio generated successfully ({len(audio_base64)} chars base64)")
-                    else:
-                        logger.warning("[HUMANIZER] Audio generation failed, falling back to text")
-                        response_type = "text"
-                else:
-                    logger.warning("[HUMANIZER] ElevenLabs not configured (no API key), falling back to text")
-                    response_type = "text"
+                        logger.info(f"[HUMANIZER] ElevenLabs audio generated ({len(audio_base64)} chars)")
+                        audio_generated = True
 
             except Exception as e:
-                logger.error(f"[HUMANIZER] Error generating audio: {e}")
+                logger.warning(f"[HUMANIZER] ElevenLabs failed: {e}")
+
+            # Fallback to OpenAI TTS if ElevenLabs failed
+            if not audio_generated:
+                try:
+                    logger.info(f"[HUMANIZER] Trying OpenAI TTS as fallback...")
+
+                    if openai_tts.is_configured():
+                        # Map voice_id to OpenAI voice if needed
+                        openai_voice = "nova"  # Default for Portuguese
+                        if voice_id and voice_id in openai_tts.VOICES:
+                            openai_voice = voice_id
+
+                        audio_base64 = await openai_tts.get_audio_base64(response, openai_voice)
+                        if audio_base64:
+                            logger.info(f"[HUMANIZER] OpenAI TTS audio generated ({len(audio_base64)} chars)")
+                            audio_generated = True
+                        else:
+                            logger.warning("[HUMANIZER] OpenAI TTS failed to generate audio")
+                    else:
+                        logger.warning("[HUMANIZER] OpenAI TTS not configured")
+
+                except Exception as e:
+                    logger.error(f"[HUMANIZER] OpenAI TTS error: {e}")
+
+            # If both failed, fallback to text
+            if not audio_generated:
+                logger.warning("[HUMANIZER] All TTS services failed, falling back to text")
                 response_type = "text"
         else:
             logger.info(f"[HUMANIZER] Skipping audio generation (response_type={response_type})")

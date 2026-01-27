@@ -55,6 +55,13 @@ from .elevenlabs import (
     create_elevenlabs_service
 )
 
+# OpenAI TTS (fallback/alternative)
+from .openai_tts import (
+    openai_tts,
+    OpenAITTSService,
+    create_openai_tts_service
+)
+
 
 __all__ = [
     # Database
@@ -110,4 +117,9 @@ __all__ = [
     "elevenlabs",
     "ElevenLabsService",
     "create_elevenlabs_service",
+
+    # OpenAI TTS (fallback)
+    "openai_tts",
+    "OpenAITTSService",
+    "create_openai_tts_service",
 ]
