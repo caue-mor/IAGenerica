@@ -28,14 +28,18 @@ async def process_message(
             return
 
         # Check if it's a valid inbound message
+        logger.info(f"Processing: is_inbound={payload.is_inbound}, message_text={payload.message_text}, sender={payload.sender_phone}")
+
         if not payload.is_inbound or not payload.message_text:
-            logger.info(f"Skipping non-inbound or empty message")
+            logger.info(f"Skipping: is_inbound={payload.is_inbound}, has_text={bool(payload.message_text)}")
             return
 
         sender_phone = payload.sender_phone
         if not sender_phone:
             logger.error("Could not extract sender phone")
             return
+
+        logger.info(f"Processing message from {sender_phone}: {payload.message_text[:50]}...")
 
         # Get or create lead
         lead = await db.get_or_create_lead(
@@ -144,7 +148,7 @@ async def receive_webhook(
         # Parse payload
         webhook = parse_webhook(payload)
 
-        logger.info(f"Parsed webhook: event={webhook.event}, is_message={webhook.is_message_event}, sender={webhook.sender_phone}, text={webhook.message_text}")
+        logger.info(f"Parsed webhook: EventType={webhook.EventType}, is_message={webhook.is_message_event}, is_inbound={webhook.is_inbound}, sender={webhook.sender_phone}, name={webhook.sender_name}, text={webhook.message_text}")
 
         # Handle connection events
         if webhook.is_connection_event:

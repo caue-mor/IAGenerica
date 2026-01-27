@@ -1,9 +1,22 @@
 """
 UAZAPI webhook payload parser
 
-Handles multiple UAZAPI webhook payload formats:
-1. Message events: { event: "messages", instance: "id", data: {...} }
-2. Connection events: { BaseUrl: "...", instance: { name, status, ... } }
+Based on UAZAPI OpenAPI spec, webhooks are sent in this format:
+{
+  "event": "messages" or "type": "message",
+  "instance": "instance_id",
+  "data": {
+    "id": "message_id",
+    "chatid": "5511999999999@s.whatsapp.net",
+    "sender": "5511999999999",
+    "senderName": "Name",
+    "fromMe": false,
+    "text": "Hello",
+    "messageType": "conversation",
+    "messageTimestamp": 1672531200000,
+    ...
+  }
+}
 """
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field, model_validator
@@ -18,7 +31,7 @@ class WebhookSender(BaseModel):
 
 
 class WebhookMessage(BaseModel):
-    """Message information from webhook"""
+    """Message information from webhook - legacy format"""
     id: Optional[str] = None
     body: Optional[str] = None
     type: Optional[str] = None
@@ -55,18 +68,47 @@ class WebhookInstance(BaseModel):
 
 class WebhookPayload(BaseModel):
     """
-    UAZAPI webhook payload - flexible model that handles multiple formats
+    UAZAPI webhook payload - flexible model that handles the actual format:
+
+    {
+      "BaseUrl": "https://xxx.uazapi.com",
+      "EventType": "messages",
+      "instanceName": "instance-name",
+      "chat": {...},
+      "message": {
+        "chatid": "558599673669@s.whatsapp.net",
+        "sender_pn": "558599673669@s.whatsapp.net",
+        "senderName": "Name",
+        "text": "Hello",
+        "fromMe": false,
+        ...
+      },
+      "owner": "558596681498",
+      "token": "..."
+    }
     """
-    # Standard format fields
+    # UAZAPI actual format fields
+    EventType: Optional[str] = None  # "messages", "connection", etc.
+    BaseUrl: Optional[str] = None
+    instanceName: Optional[str] = None
+    owner: Optional[str] = None
+    token: Optional[str] = None
+    chatSource: Optional[str] = None
+
+    # Alternative format fields (for compatibility)
     event: Optional[str] = None
-    instance: Optional[Any] = None  # Can be string or dict
-    sender: Optional[WebhookSender] = None
-    message: Optional[WebhookMessage] = None
+    type: Optional[str] = None
+
+    # Instance can be string or dict
+    instance: Optional[Any] = None
+
+    # Message and chat data
+    message: Optional[dict] = None  # Changed to dict for flexibility
     chat: Optional[dict] = None
     data: Optional[dict] = None
 
-    # Alternative format fields (connection events)
-    BaseUrl: Optional[str] = None
+    # Legacy format
+    sender: Optional[WebhookSender] = None
 
     # Parsed instance data
     instance_data: Optional[WebhookInstance] = None
@@ -76,58 +118,116 @@ class WebhookPayload(BaseModel):
 
     @model_validator(mode='after')
     def parse_instance(self):
-        """Parse instance field which can be string or dict"""
+        """Parse instance field and normalize data"""
+        # Handle instance as dict or string
         if isinstance(self.instance, dict):
             self.instance_data = WebhookInstance(**self.instance)
-            # Detect connection event
-            if not self.event and self.instance_data.status:
-                self.event = "connection.update"
+            # Detect connection event from instance status
+            if self.instance_data.status:
+                if not self.EventType and not self.event:
+                    self.event = "connection.update"
         elif isinstance(self.instance, str):
             self.instance_data = WebhookInstance(name=self.instance)
+
+        # Create instance_data from instanceName if not set
+        if not self.instance_data and self.instanceName:
+            self.instance_data = WebhookInstance(
+                name=self.instanceName,
+                token=self.token
+            )
+
         return self
 
     @property
     def is_message_event(self) -> bool:
         """Check if this is a message event"""
-        # If we have message data, it's likely a message event
-        if self.message or (self.data and self.data.get("message")):
+        # Check EventType first (actual UAZAPI format)
+        if self.EventType:
+            return self.EventType.lower() in ["messages", "message"]
+
+        # If we have message data with text, it's a message event
+        if self.message and (self.message.get("text") or self.message.get("content")):
             return True
-        if not self.event:
-            return False
-        event_lower = self.event.lower()
-        return any(x in event_lower for x in ["message", "messages", "chat", "text"])
+
+        # Check legacy event field
+        if self.event:
+            event_lower = self.event.lower()
+            return any(x in event_lower for x in ["message", "messages", "chat", "text"])
+
+        # Check data field
+        if self.data and self.data.get("message"):
+            return True
+
+        return False
 
     @property
     def is_connection_event(self) -> bool:
         """Check if this is a connection event"""
-        if not self.event:
-            # Check if instance has status (connection update)
-            if self.instance_data and self.instance_data.status:
-                return True
-            return False
-        return self.event.lower() in ["connection", "connection.update"]
+        # Check EventType first
+        if self.EventType:
+            return self.EventType.lower() in ["connection", "connection.update"]
+
+        if self.event:
+            return self.event.lower() in ["connection", "connection.update"]
+
+        # Check if instance has status (connection update)
+        if self.instance_data and self.instance_data.status:
+            return True
+
+        return False
 
     @property
     def is_inbound(self) -> bool:
         """Check if message is inbound (from user)"""
-        if self.message:
-            return not self.message.fromMe
+        # Check message dict (actual UAZAPI format)
+        if self.message and isinstance(self.message, dict):
+            return not self.message.get("fromMe", True)
+
         # Check in data field
         if self.data:
             msg = self.data.get("message", {})
             return not msg.get("fromMe", True)
+
         return False
 
     @property
     def sender_phone(self) -> Optional[str]:
         """Extract sender phone number"""
-        # Try sender field
+        # UAZAPI format: message.sender_pn = "558599673669@s.whatsapp.net"
+        if self.message and isinstance(self.message, dict):
+            # Try sender_pn first (most reliable)
+            sender_pn = self.message.get("sender_pn")
+            if sender_pn:
+                return extract_phone_from_jid(sender_pn)
+
+            # Try chatid
+            chatid = self.message.get("chatid")
+            if chatid:
+                return extract_phone_from_jid(chatid)
+
+            # Try sender (might be LID format)
+            sender = self.message.get("sender")
+            if sender and "@s.whatsapp.net" in sender:
+                return extract_phone_from_jid(sender)
+
+        # Try chat field
+        if self.chat and isinstance(self.chat, dict):
+            wa_chatid = self.chat.get("wa_chatid")
+            if wa_chatid:
+                return extract_phone_from_jid(wa_chatid)
+
+            phone = self.chat.get("phone")
+            if phone:
+                # Clean phone format like "+55 85 9967-3669"
+                return phone.replace("+", "").replace(" ", "").replace("-", "")
+
+        # Try legacy sender field
         if self.sender:
             phone = self.sender.phone or self.sender.id
             if phone:
                 return extract_phone_from_jid(phone)
 
-        # Try data.key.remoteJid
+        # Try data field
         if self.data:
             key = self.data.get("key", {})
             remote_jid = key.get("remoteJid")
@@ -139,72 +239,99 @@ class WebhookPayload(BaseModel):
     @property
     def sender_name(self) -> Optional[str]:
         """Extract sender name"""
+        # UAZAPI format: message.senderName
+        if self.message and isinstance(self.message, dict):
+            sender_name = self.message.get("senderName")
+            if sender_name:
+                return sender_name
+
+        # Try chat field
+        if self.chat and isinstance(self.chat, dict):
+            name = self.chat.get("name") or self.chat.get("wa_name") or self.chat.get("wa_contactName")
+            if name:
+                return name
+
+        # Try legacy sender field
         if self.sender:
             return self.sender.pushName or self.sender.name
+
         # Try data field
         if self.data:
-            return self.data.get("pushName")
+            return self.data.get("pushName") or self.data.get("senderName")
+
         return None
 
     @property
     def message_text(self) -> Optional[str]:
         """Extract message text content"""
-        # Try message field
-        if self.message:
-            if self.message.body:
-                return self.message.body
-            if self.message.caption:
-                return self.message.caption
+        # UAZAPI format: message.text or message.content
+        if self.message and isinstance(self.message, dict):
+            # Try text first (most common)
+            text = self.message.get("text")
+            if text:
+                return text
 
-        # Try data.message field
+            # Try content
+            content = self.message.get("content")
+            if content and isinstance(content, str):
+                return content
+
+            # Try body
+            body = self.message.get("body")
+            if body:
+                return body
+
+        # Try data.message field (legacy format)
         if self.data:
             msg = self.data.get("message", {})
-            # Text message
-            if "conversation" in msg:
-                return msg["conversation"]
-            # Extended text
-            if "extendedTextMessage" in msg:
-                return msg["extendedTextMessage"].get("text")
-            # Image/video caption
-            for media_type in ["imageMessage", "videoMessage", "documentMessage"]:
-                if media_type in msg:
-                    return msg[media_type].get("caption")
+            if isinstance(msg, dict):
+                # Text message
+                if "conversation" in msg:
+                    return msg["conversation"]
+                # Extended text
+                if "extendedTextMessage" in msg:
+                    return msg["extendedTextMessage"].get("text")
+                # Image/video caption
+                for media_type in ["imageMessage", "videoMessage", "documentMessage"]:
+                    if media_type in msg:
+                        return msg[media_type].get("caption")
 
         return None
 
     @property
     def message_type(self) -> str:
         """Get message type"""
-        if self.message:
-            msg_type = self.message.type or "text"
+        msg_type = "text"
+
+        # UAZAPI format: message.messageType or message.type
+        if self.message and isinstance(self.message, dict):
+            msg_type = self.message.get("messageType") or self.message.get("type") or "text"
         elif self.data:
             msg = self.data.get("message", {})
-            # Detect type from message structure
-            if "conversation" in msg or "extendedTextMessage" in msg:
-                msg_type = "text"
-            elif "imageMessage" in msg:
-                msg_type = "image"
-            elif "videoMessage" in msg:
-                msg_type = "video"
-            elif "audioMessage" in msg:
-                msg_type = "audio"
-            elif "documentMessage" in msg:
-                msg_type = "document"
-            elif "stickerMessage" in msg:
-                msg_type = "sticker"
-            elif "locationMessage" in msg:
-                msg_type = "location"
-            elif "contactMessage" in msg or "contactsArrayMessage" in msg:
-                msg_type = "contact"
-            else:
-                msg_type = "text"
-        else:
-            msg_type = "text"
+            if isinstance(msg, dict):
+                # Detect type from message structure
+                if "conversation" in msg or "extendedTextMessage" in msg:
+                    msg_type = "text"
+                elif "imageMessage" in msg:
+                    msg_type = "image"
+                elif "videoMessage" in msg:
+                    msg_type = "video"
+                elif "audioMessage" in msg:
+                    msg_type = "audio"
+                elif "documentMessage" in msg:
+                    msg_type = "document"
+                elif "stickerMessage" in msg:
+                    msg_type = "sticker"
+                elif "locationMessage" in msg:
+                    msg_type = "location"
+                elif "contactMessage" in msg or "contactsArrayMessage" in msg:
+                    msg_type = "contact"
 
         # Normalize type
         type_mapping = {
             "chat": "text",
             "text": "text",
+            "conversation": "text",
             "image": "image",
             "video": "video",
             "audio": "audio",
@@ -220,15 +347,17 @@ class WebhookPayload(BaseModel):
     @property
     def media_url(self) -> Optional[str]:
         """Get media URL if present"""
-        if self.message:
-            return self.message.mediaUrl
+        # UAZAPI format: message.fileURL or message.mediaUrl
+        if self.message and isinstance(self.message, dict):
+            return self.message.get("fileURL") or self.message.get("mediaUrl")
         return None
 
     @property
     def message_id(self) -> Optional[str]:
         """Get message ID"""
-        if self.message:
-            return self.message.id
+        # UAZAPI format: message.messageid or message.id
+        if self.message and isinstance(self.message, dict):
+            return self.message.get("messageid") or self.message.get("id")
         if self.data:
             key = self.data.get("key", {})
             return key.get("id")
@@ -251,7 +380,14 @@ class WebhookPayload(BaseModel):
 
     @property
     def company_id_from_instance(self) -> Optional[int]:
-        """Try to extract company_id from instance adminField02 or name"""
+        """Try to extract company_id from instance name or adminField02"""
+        # Try instanceName first (actual UAZAPI format: iagenerica-1)
+        if self.instanceName and self.instanceName.startswith("iagenerica-"):
+            try:
+                return int(self.instanceName.replace("iagenerica-", ""))
+            except (ValueError, TypeError):
+                pass
+
         if self.instance_data:
             # Try adminField02
             if self.instance_data.adminField02:
