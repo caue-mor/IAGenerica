@@ -80,12 +80,21 @@ class IntelligentFlowProcessor:
             {"role": "system", "content": system_prompt}
         ]
 
-        # Add conversation history
+        # Add conversation history (handle both dict and LangChain message objects)
         for msg in flow_context.conversation_history[-6:]:
-            messages.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            if isinstance(msg, dict):
+                messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+            else:
+                # Handle LangChain AIMessage/HumanMessage objects
+                role = "assistant" if hasattr(msg, "type") and msg.type == "ai" else "user"
+                if hasattr(msg, "content"):
+                    messages.append({
+                        "role": role,
+                        "content": str(msg.content) if msg.content else ""
+                    })
 
         # Add current user message
         messages.append({"role": "user", "content": user_message})
