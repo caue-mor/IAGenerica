@@ -20,6 +20,7 @@ LEAD_STATUSES_TABLE = f"{TABLE_PREFIX}lead_statuses"
 LEADS_TABLE = f"{TABLE_PREFIX}leads"
 CONVERSATIONS_TABLE = f"{TABLE_PREFIX}conversations"
 MESSAGES_TABLE = f"{TABLE_PREFIX}messages"
+CHECKPOINTS_TABLE = f"{TABLE_PREFIX}checkpoints"
 
 
 class DatabaseService:
@@ -79,6 +80,31 @@ class DatabaseService:
         if response.data:
             return Company(**response.data[0])
         return None
+
+    async def update_company_flow_with_reset(self, company_id: int, flow_config: FlowConfig) -> Optional[Company]:
+        """
+        Update company flow AND reset all conversation states.
+
+        Use this when the flow is modified to ensure all conversations
+        start fresh with the new flow.
+        """
+        try:
+            # First reset all conversations
+            reset_count = await self.reset_company_conversations(company_id)
+            print(f"[DB] Reset {reset_count} conversations for company {company_id}")
+
+            # Then update the flow
+            response = supabase.table(COMPANIES_TABLE).update({
+                "flow_config": flow_config.model_dump()
+            }).eq("id", company_id).execute()
+
+            if response.data:
+                return Company(**response.data[0])
+            return None
+
+        except Exception as e:
+            print(f"[DB] Error in update_company_flow_with_reset: {e}")
+            return None
 
     async def delete_company(self, company_id: int) -> bool:
         """Delete company"""
@@ -205,9 +231,100 @@ class DatabaseService:
         return None
 
     async def delete_lead(self, lead_id: int) -> bool:
-        """Delete lead"""
+        """Delete lead (simple delete without cleanup - use delete_lead_with_cleanup for full reset)"""
         response = supabase.table(LEADS_TABLE).delete().eq("id", lead_id).execute()
         return len(response.data) > 0 if response.data else False
+
+    async def delete_lead_with_cleanup(self, lead_id: int) -> bool:
+        """
+        Delete lead and ALL related data (conversations, messages, checkpoints, memory).
+
+        Use this when you want to completely reset a lead as if they never existed.
+        This is the recommended method for deleting leads.
+        """
+        try:
+            # Get all conversations for this lead to delete their checkpoints
+            conversations = supabase.table(CONVERSATIONS_TABLE).select("thread_id").eq(
+                "lead_id", lead_id
+            ).execute()
+
+            thread_ids = [c["thread_id"] for c in (conversations.data or [])]
+
+            # Delete checkpoints for all threads
+            if thread_ids:
+                for thread_id in thread_ids:
+                    supabase.table(CHECKPOINTS_TABLE).delete().eq(
+                        "thread_id", thread_id
+                    ).execute()
+
+            # Delete all messages for this lead
+            supabase.table(MESSAGES_TABLE).delete().eq("lead_id", lead_id).execute()
+
+            # Delete all conversations for this lead
+            supabase.table(CONVERSATIONS_TABLE).delete().eq("lead_id", lead_id).execute()
+
+            # Finally delete the lead
+            response = supabase.table(LEADS_TABLE).delete().eq("id", lead_id).execute()
+
+            print(f"[DB] Lead {lead_id} deleted with full cleanup")
+            return len(response.data) > 0 if response.data else False
+
+        except Exception as e:
+            print(f"[DB] Error in delete_lead_with_cleanup: {e}")
+            return False
+
+    async def reset_lead_memory(self, lead_id: int) -> bool:
+        """
+        Reset lead's memory and conversation state without deleting the lead.
+
+        Clears:
+        - lead.memory (long-term AI memory)
+        - lead.dados_coletados (collected data)
+        - lead.nome (name)
+        - All conversations context
+        - All checkpoints
+
+        Use this to start fresh with an existing lead.
+        """
+        try:
+            # Get lead to check if exists
+            lead = await self.get_lead(lead_id)
+            if not lead:
+                return False
+
+            # Reset lead memory and dados_coletados
+            supabase.table(LEADS_TABLE).update({
+                "memory": {},
+                "dados_coletados": {},
+                "nome": None,
+                "ai_enabled": True
+            }).eq("id", lead_id).execute()
+
+            # Get all conversations for this lead
+            conversations = supabase.table(CONVERSATIONS_TABLE).select("id, thread_id").eq(
+                "lead_id", lead_id
+            ).execute()
+
+            # Reset each conversation and delete checkpoints
+            for conv in (conversations.data or []):
+                # Reset conversation context and node position
+                supabase.table(CONVERSATIONS_TABLE).update({
+                    "context": {},
+                    "current_node_id": None,
+                    "ai_enabled": True
+                }).eq("id", conv["id"]).execute()
+
+                # Delete checkpoints for this thread
+                supabase.table(CHECKPOINTS_TABLE).delete().eq(
+                    "thread_id", conv["thread_id"]
+                ).execute()
+
+            print(f"[DB] Lead {lead_id} memory reset successfully")
+            return True
+
+        except Exception as e:
+            print(f"[DB] Error in reset_lead_memory: {e}")
+            return False
 
     async def get_or_create_lead(self, company_id: int, celular: str, origem: Optional[str] = None) -> Lead:
         """Get existing lead or create new one"""
@@ -220,6 +337,59 @@ class DatabaseService:
             celular=celular,
             origem=origem or "whatsapp"
         ))
+
+    async def validate_lead_or_cleanup(self, company_id: int, celular: str) -> tuple[bool, Optional[Lead]]:
+        """
+        Validate if lead exists. If not but has orphaned data, clean it up.
+
+        This is a SAFETY CHECK - if a lead doesn't exist but there's orphaned
+        conversation/checkpoint data, it cleans everything up.
+
+        Returns:
+            (is_new_lead, lead_or_none)
+            - (True, None) if lead doesn't exist and no cleanup needed
+            - (True, None) if lead didn't exist but orphaned data was cleaned
+            - (False, Lead) if lead exists
+        """
+        try:
+            # Check if lead exists
+            lead = await self.get_lead_by_phone(company_id, celular)
+
+            if lead:
+                return (False, lead)
+
+            # Lead doesn't exist - check for orphaned conversations/checkpoints
+            # This can happen if lead was deleted but data remained
+
+            # Look for orphaned conversations by phone pattern in thread_id
+            orphaned_convs = supabase.table(CONVERSATIONS_TABLE).select("id, thread_id, lead_id").eq(
+                "company_id", company_id
+            ).like("thread_id", f"%{celular}%").execute()
+
+            if orphaned_convs.data:
+                for conv in orphaned_convs.data:
+                    # Delete checkpoints
+                    supabase.table(CHECKPOINTS_TABLE).delete().eq(
+                        "thread_id", conv["thread_id"]
+                    ).execute()
+
+                    # Delete messages
+                    supabase.table(MESSAGES_TABLE).delete().eq(
+                        "conversation_id", conv["id"]
+                    ).execute()
+
+                    # Delete conversation
+                    supabase.table(CONVERSATIONS_TABLE).delete().eq(
+                        "id", conv["id"]
+                    ).execute()
+
+                print(f"[DB] Cleaned up {len(orphaned_convs.data)} orphaned conversations for {celular}")
+
+            return (True, None)
+
+        except Exception as e:
+            print(f"[DB] Error in validate_lead_or_cleanup: {e}")
+            return (True, None)
 
     # ==================== CONVERSATIONS ====================
 
@@ -306,6 +476,70 @@ class DatabaseService:
             return Conversation(**response.data[0])
         return None
 
+    async def reset_conversation(self, conversation_id: int) -> Optional[Conversation]:
+        """Reset a single conversation to initial state"""
+        try:
+            # Get conversation to find thread_id
+            conv = await self.get_conversation(conversation_id)
+            if not conv:
+                return None
+
+            # Delete checkpoints
+            supabase.table(CHECKPOINTS_TABLE).delete().eq(
+                "thread_id", conv.thread_id
+            ).execute()
+
+            # Reset conversation
+            response = supabase.table(CONVERSATIONS_TABLE).update({
+                "context": {},
+                "current_node_id": None,
+                "ai_enabled": True
+            }).eq("id", conversation_id).execute()
+
+            if response.data:
+                return Conversation(**response.data[0])
+            return None
+
+        except Exception as e:
+            print(f"[DB] Error in reset_conversation: {e}")
+            return None
+
+    async def reset_company_conversations(self, company_id: int) -> int:
+        """
+        Reset ALL conversations for a company (use when flow is updated).
+
+        This resets conversation state but keeps the lead data intact.
+        Returns the number of conversations reset.
+        """
+        try:
+            # Get all conversations for this company
+            conversations = supabase.table(CONVERSATIONS_TABLE).select("id, thread_id").eq(
+                "company_id", company_id
+            ).execute()
+
+            count = 0
+            for conv in (conversations.data or []):
+                # Reset conversation context and node position
+                supabase.table(CONVERSATIONS_TABLE).update({
+                    "context": {},
+                    "current_node_id": None,
+                    "ai_enabled": True
+                }).eq("id", conv["id"]).execute()
+
+                # Delete checkpoints for this thread
+                supabase.table(CHECKPOINTS_TABLE).delete().eq(
+                    "thread_id", conv["thread_id"]
+                ).execute()
+
+                count += 1
+
+            print(f"[DB] Reset {count} conversations for company {company_id}")
+            return count
+
+        except Exception as e:
+            print(f"[DB] Error in reset_company_conversations: {e}")
+            return 0
+
     async def get_or_create_conversation(
         self,
         company_id: int,
@@ -385,6 +619,37 @@ class DatabaseService:
             media_url=media_url,
             uazapi_message_id=uazapi_message_id
         ))
+
+    # ==================== CLEANUP UTILITIES ====================
+
+    async def cleanup_orphaned_checkpoints(self) -> int:
+        """
+        Clean up checkpoints that don't have a corresponding conversation.
+
+        Run this periodically to clean up orphaned data.
+        Returns the number of checkpoints deleted.
+        """
+        try:
+            # Get all thread_ids from conversations
+            valid_threads = supabase.table(CONVERSATIONS_TABLE).select("thread_id").execute()
+            valid_thread_ids = set(c["thread_id"] for c in (valid_threads.data or []))
+
+            # Get all checkpoints
+            all_checkpoints = supabase.table(CHECKPOINTS_TABLE).select("id, thread_id").execute()
+
+            deleted = 0
+            for cp in (all_checkpoints.data or []):
+                if cp["thread_id"] not in valid_thread_ids:
+                    supabase.table(CHECKPOINTS_TABLE).delete().eq("id", cp["id"]).execute()
+                    deleted += 1
+
+            if deleted > 0:
+                print(f"[DB] Cleaned up {deleted} orphaned checkpoints")
+            return deleted
+
+        except Exception as e:
+            print(f"[DB] Error in cleanup_orphaned_checkpoints: {e}")
+            return 0
 
 
 # Singleton instance

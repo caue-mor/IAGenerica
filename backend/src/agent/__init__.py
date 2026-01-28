@@ -3,19 +3,28 @@ Agent module for IA-Generica.
 
 This module provides the complete LangGraph-based conversation agent with:
 - StateGraph for state management
-- MemorySaver for checkpointing
+- PostgreSQL checkpointing for persistence
+- Unified memory system
+- Goal-based flow interpretation
+- Intelligent AI brain for natural responses
 - Tool system for actions
 - Flow executor for deterministic flows
 - ReAct agent for free conversation
 
 Main components:
-- ConversationGraph: The main LangGraph StateGraph
+- IntelligentConversationGraph: The new architecture LangGraph
+- ConversationGraph: Alias for backward compatibility
+- UnifiedMemory: Complete memory system
+- FlowInterpreter: Converts flows to goals
+- AIBrain: Intelligent response generation
+- GoalTracker: Progress monitoring
 - AgentState: TypedDict for state management
 - PromptBuilder: Dynamic prompt generation
 - Tools: Data collection, notification, scheduling, knowledge
 """
 
 from .graph import (
+    IntelligentConversationGraph,
     ConversationGraph,
     ConversationAgent,
     agent,
@@ -35,6 +44,56 @@ from .state import (
 )
 
 from .prompts import PromptBuilder
+
+# New architecture components
+from .memory import (
+    UnifiedMemory,
+    MemoryManager,
+    LeadProfile,
+    KnownFacts,
+    Interaction,
+    ConversationState,
+    GoalProgress,
+    Sentiment,
+    InteractionStyle
+)
+
+from .flow_interpreter import (
+    FlowInterpreter,
+    FlowIntent,
+    ConversationGoal,
+    FlowCondition,
+    FlowAction,
+    NotificationConfig,
+    HandoffTrigger,
+    GoalPriority,
+    FieldCategory,
+    interpret_flow,
+    create_intent_from_dict
+)
+
+from .brain import (
+    AIBrain,
+    CompanyContext,
+    BrainDecision,
+    ResponseAction,
+    create_brain
+)
+
+from .goal_tracker import (
+    GoalTracker,
+    GoalStatus,
+    GoalUpdate,
+    TriggeredCondition,
+    ConditionResult,
+    ExtractionResult
+)
+
+from .checkpointer import (
+    SupabaseCheckpointSaver,
+    create_checkpointer,
+    get_migration_sql
+)
 
 from .tools import (
     all_tools,
@@ -68,14 +127,59 @@ from .tools import (
 )
 
 __all__ = [
-    # Main graph
+    # Main graph (new architecture)
+    "IntelligentConversationGraph",
     "ConversationGraph",
     "ConversationAgent",
     "agent",
     "invoke_agent",
     "get_graph",
 
-    # State
+    # Memory system
+    "UnifiedMemory",
+    "MemoryManager",
+    "LeadProfile",
+    "KnownFacts",
+    "Interaction",
+    "ConversationState",
+    "GoalProgress",
+    "Sentiment",
+    "InteractionStyle",
+
+    # Flow interpreter
+    "FlowInterpreter",
+    "FlowIntent",
+    "ConversationGoal",
+    "FlowCondition",
+    "FlowAction",
+    "NotificationConfig",
+    "HandoffTrigger",
+    "GoalPriority",
+    "FieldCategory",
+    "interpret_flow",
+    "create_intent_from_dict",
+
+    # AI Brain
+    "AIBrain",
+    "CompanyContext",
+    "BrainDecision",
+    "ResponseAction",
+    "create_brain",
+
+    # Goal tracker
+    "GoalTracker",
+    "GoalStatus",
+    "GoalUpdate",
+    "TriggeredCondition",
+    "ConditionResult",
+    "ExtractionResult",
+
+    # Checkpointer
+    "SupabaseCheckpointSaver",
+    "create_checkpointer",
+    "get_migration_sql",
+
+    # State (legacy)
     "AgentState",
     "CompanyConfig",
     "LeadData",
