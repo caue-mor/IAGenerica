@@ -293,11 +293,13 @@ FIELD_DESCRIPTIONS = {
     "cidade": "Cidade onde a pessoa está localizada",
     "endereco": "Endereço completo",
     "cpf": "CPF (número de identificação)",
-    "cep": "CEP (código postal)",
+    "cep": "CEP (código postal) - apenas para registro, nosso consultor entrará em contato para detalhes de entrega/frete",
     "interesse": "O que a pessoa está buscando/seu interesse principal",
     "orcamento": "Valor disponível para investimento",
     "urgencia": "Nível de urgência/prazo para decisão",
     "data_nascimento": "Data de nascimento",
+    "produto": "Produto de interesse confirmado",
+    "modelo": "Modelo específico de interesse",
 }
 
 # Field type to priority mapping

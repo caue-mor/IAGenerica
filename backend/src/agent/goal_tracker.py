@@ -405,17 +405,32 @@ class GoalTracker:
         Returns:
             Tuple of (should_handoff, reason)
         """
-        # Check if qualified
-        if self.is_qualified():
-            for trigger in self.flow_intent.handoff_triggers:
-                if trigger.condition == "qualified" or trigger.condition == "goal_complete":
-                    return True, trigger.reason
+        # Check if ALL goals (not just required) are complete
+        all_goals_complete = all(g.collected for g in self.flow_intent.goals) if self.flow_intent.goals else False
 
-        # Check if all required goals complete
-        if self.flow_intent.is_complete():
+        # Check if required goals are complete
+        required_complete = self.flow_intent.is_complete()
+
+        # Check if qualified
+        is_qualified = self.is_qualified()
+
+        # If there are handoff triggers, check them
+        if self.flow_intent.handoff_triggers:
             for trigger in self.flow_intent.handoff_triggers:
-                if trigger.condition == "goal_complete":
-                    return True, trigger.reason
+                if trigger.condition == "qualified" and is_qualified:
+                    return True, trigger.reason or "Lead qualificado"
+                if trigger.condition == "goal_complete" and (all_goals_complete or required_complete):
+                    return True, trigger.reason or "Todos os dados coletados"
+                if trigger.condition == "all_complete" and all_goals_complete:
+                    return True, trigger.reason or "Coleta completa"
+
+        # Default: handoff when all goals are complete (even without explicit trigger)
+        if all_goals_complete:
+            return True, "Todos os dados foram coletados - passar para consultor"
+
+        # Or when required goals are complete and we have handoff triggers
+        if required_complete and self.flow_intent.handoff_triggers:
+            return True, "Dados obrigatórios coletados - passar para consultor"
 
         return False, None
 

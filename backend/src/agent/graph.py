@@ -301,13 +301,28 @@ class IntelligentConversationGraph:
                 await db.set_conversation_ai(conversation_id, False)
                 await db.set_lead_ai(lead_id, False)
 
-                # Send notification
+                # Build complete lead info for notification
+                lead_info_parts = []
+                if memory.collected_data.get("nome"):
+                    lead_info_parts.append(f"Nome: {memory.collected_data['nome']}")
+                if memory.collected_data.get("produto"):
+                    lead_info_parts.append(f"Produto: {memory.collected_data['produto']}")
+                if memory.collected_data.get("cep"):
+                    lead_info_parts.append(f"CEP: {memory.collected_data['cep']}")
+                for key, value in memory.collected_data.items():
+                    if key not in ["nome", "produto", "cep"] and value:
+                        lead_info_parts.append(f"{key.title()}: {value}")
+
+                # Send detailed handoff notification
+                detailed_reason = f"{decision.handoff_reason}\n\n📋 Dados coletados:\n" + "\n".join(lead_info_parts) if lead_info_parts else decision.handoff_reason
+
                 await notification_service.notify_handoff(
                     company_id=state.get("company_id"),
                     lead_id=lead_id,
                     lead_name=memory.collected_data.get("nome"),
-                    reason=decision.handoff_reason
+                    reason=detailed_reason
                 )
+                logger.info(f"[INTELLIGENT] Handoff notification sent with data: {memory.collected_data}")
 
             # Update collected fields from extractions
             if decision.extractions:
@@ -328,10 +343,24 @@ class IntelligentConversationGraph:
             progress = goal_tracker.get_progress()
             result["qualification_score"] = progress.qualification_score
 
-            # Check if flow is complete
-            if flow_intent.is_complete():
+            # Check if flow is complete (all goals collected)
+            all_goals_complete = all(g.collected for g in flow_intent.goals) if flow_intent.goals else False
+            if flow_intent.is_complete() or all_goals_complete:
                 result["flow_completed"] = True
-                logger.info("[INTELLIGENT] All goals completed")
+                logger.info("[INTELLIGENT] All goals completed - notifying company")
+
+                # Send notification with all collected data
+                try:
+                    await notification_service.notify_qualified_lead(
+                        company_id=state.get("company_id"),
+                        lead_id=lead_id,
+                        lead_name=memory.collected_data.get("nome"),
+                        qualification_score=progress.qualification_score,
+                        qualification_data=memory.collected_data
+                    )
+                    logger.info(f"[INTELLIGENT] Notification sent with data: {memory.collected_data}")
+                except Exception as notif_err:
+                    logger.error(f"[INTELLIGENT] Failed to send notification: {notif_err}")
 
             # Step 7: Update memory with interaction
             memory.add_interaction(
