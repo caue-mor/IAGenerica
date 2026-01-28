@@ -7,6 +7,8 @@ This module provides a comprehensive memory system that handles:
 - Episodic: Interaction history
 - Semantic: Known facts about the lead
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional

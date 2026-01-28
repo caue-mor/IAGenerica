@@ -5,6 +5,8 @@ Instead of treating the flow as a script to follow mechanically,
 this module interprets the flow as a set of OBJECTIVES that the AI
 should accomplish through natural conversation.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from enum import Enum

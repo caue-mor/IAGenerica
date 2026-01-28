@@ -9,6 +9,8 @@ This module provides the central intelligence that:
 
 The AI Brain receives CONTEXT, not SCRIPTS. It decides HOW to achieve goals naturally.
 """
+from __future__ import annotations
+
 import json
 import re
 from dataclasses import dataclass, field

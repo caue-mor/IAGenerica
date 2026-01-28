@@ -4,6 +4,8 @@ Goal Tracker - Tracks progress of conversation goals in real-time.
 This module monitors the completion status of conversation goals,
 handles goal updates, and triggers actions when conditions are met.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional, Callable

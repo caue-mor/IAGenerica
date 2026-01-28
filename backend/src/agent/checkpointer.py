@@ -4,11 +4,13 @@ PostgreSQL Checkpointer for LangGraph state persistence.
 This module provides a PostgreSQL-backed checkpointer that replaces
 the default MemorySaver, enabling state persistence across server restarts.
 """
+from __future__ import annotations
+
 import json
 import pickle
 import base64
 from datetime import datetime
-from typing import Any, Optional, Iterator, Tuple
+from typing import Any, Optional, Iterator, Tuple, List
 from contextlib import contextmanager
 
 from langgraph.checkpoint.base import (
@@ -262,7 +264,7 @@ class SupabaseCheckpointSaver(BaseCheckpointSaver):
     def put_writes(
         self,
         config: RunnableConfig,
-        writes: list[Tuple[str, Any]],
+        writes: List[Tuple[str, Any]],
         task_id: str
     ) -> None:
         """Store intermediate writes. Not implemented for basic persistence."""
@@ -299,7 +301,7 @@ class SupabaseCheckpointSaver(BaseCheckpointSaver):
     async def aput_writes(
         self,
         config: RunnableConfig,
-        writes: list[Tuple[str, Any]],
+        writes: List[Tuple[str, Any]],
         task_id: str
     ) -> None:
         """Async version of put_writes."""

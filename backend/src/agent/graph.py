@@ -8,6 +8,8 @@ This module implements the conversation agent using the new architecture:
 - GoalTracker for progress tracking
 - PostgreSQL checkpointing for persistence
 """
+from __future__ import annotations
+
 import logging
 from typing import Optional, Any
 from datetime import datetime
