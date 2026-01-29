@@ -106,8 +106,8 @@ class OpenAITTSService:
                 logger.warning(f"Voice {voice} not available for {model}, using nova")
                 voice = "nova"
         elif voice not in self.VOICES:
-            logger.warning(f"Unknown voice {voice}, using default {self.DEFAULT_VOICE}")
-            voice = self.DEFAULT_VOICE
+            logger.warning(f"Unknown voice {voice}, using default {self.voice}")
+            voice = self.voice
 
         try:
             logger.info(f"[OpenAI TTS] Generating audio: model={model}, voice={voice}, chars={len(text)}")

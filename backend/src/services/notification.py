@@ -260,13 +260,14 @@ _Notificação automática do sistema_"""
             # Send the message
             result = await wa.send_text(to=admin_phone, message=message)
 
-            if result:
+            # Check if message was sent successfully (result contains message_id on success)
+            if result and (result.get("message_id") or result.get("success")):
                 notification.delivered = True
                 notification.delivered_at = datetime.now()
                 logger.info(f"WhatsApp notification sent to {admin_phone}: {notification.title}")
                 return True
             else:
-                logger.warning(f"Failed to send WhatsApp notification to {admin_phone}")
+                logger.warning(f"Failed to send WhatsApp notification to {admin_phone}: {result}")
                 return False
 
         except Exception as e:
