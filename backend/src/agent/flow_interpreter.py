@@ -266,6 +266,35 @@ class FlowIntent:
         """Check if all required goals are collected."""
         return all(g.collected for g in self.goals if g.required)
 
+    def format_pending_goals_for_prompt(self) -> str:
+        """Format pending goals for AI prompt."""
+        pending = self.get_pending_goals()
+        if not pending:
+            return "Todos os objetivos foram coletados!"
+
+        lines = []
+        for i, goal in enumerate(pending, 1):
+            required_marker = " *" if goal.required else ""
+            lines.append(f"{i}. {goal.field_name}{required_marker}: {goal.description}")
+            if goal.options:
+                lines.append(f"   Opções: {', '.join(goal.options)}")
+            if goal.suggested_question:
+                lines.append(f"   Sugestão: {goal.suggested_question}")
+
+        return "\n".join(lines)
+
+    def format_collected_data_for_prompt(self) -> str:
+        """Format collected data for AI prompt."""
+        collected = [g for g in self.goals if g.collected and g.value]
+        if not collected:
+            return "Nenhum dado coletado ainda."
+
+        lines = []
+        for goal in collected:
+            lines.append(f"- {goal.field_name}: {goal.value}")
+
+        return "\n".join(lines)
+
 
 # Field type to category mapping
 FIELD_CATEGORY_MAP = {
