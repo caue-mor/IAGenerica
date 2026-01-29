@@ -219,9 +219,10 @@ class MessageBufferService:
         for msg in messages:
             if msg.message_type == "text":
                 texts.append(msg.content)
-            elif msg.message_type == "audio":
-                if msg.content:
-                    texts.append(f"[Audio transcrito: {msg.content}]")
+            elif msg.message_type in ["audio", "ptt"]:
+                if msg.content and msg.content not in ["[Áudio não pôde ser transcrito]"]:
+                    # Audio was transcribed - use content directly
+                    texts.append(msg.content)
                 else:
                     texts.append("[Audio enviado]")
             elif msg.message_type == "image":
@@ -271,7 +272,7 @@ class MessageBufferService:
             if msg.media_url:
                 metadata["media_urls"].append(msg.media_url)
 
-            if msg.message_type == "audio":
+            if msg.message_type in ["audio", "ptt"]:
                 metadata["has_audio"] = True
             elif msg.message_type == "image":
                 metadata["has_image"] = True

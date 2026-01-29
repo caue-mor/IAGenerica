@@ -149,6 +149,16 @@ class WebhookPayload(BaseModel):
         if self.message and (self.message.get("text") or self.message.get("content")):
             return True
 
+        # Check if it's a media message (audio, image, video, document)
+        if self.message and isinstance(self.message, dict):
+            msg_type = self.message.get("messageType") or self.message.get("type") or ""
+            media_types = ["audio", "ptt", "image", "video", "document", "sticker"]
+            if msg_type.lower() in media_types:
+                return True
+            # Also check if there's a media URL
+            if self.message.get("fileURL") or self.message.get("mediaUrl"):
+                return True
+
         # Check legacy event field
         if self.event:
             event_lower = self.event.lower()

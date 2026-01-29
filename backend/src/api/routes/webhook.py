@@ -11,6 +11,7 @@ from ...services.database import db
 from ...services.whatsapp import create_whatsapp_service
 from ...services.buffer import message_buffer, MessageBufferService
 from ...services.notification import notification_service
+from ...services.audio_transcription import audio_transcription
 from ...agent import invoke_agent
 
 logger = logging.getLogger(__name__)
@@ -179,9 +180,36 @@ async def add_to_buffer(
             logger.error(f"Company {company_id} not found")
             return
 
-        # Check if it's a valid inbound message
-        if not payload.is_inbound or not payload.message_text:
-            logger.info(f"Skipping: is_inbound={payload.is_inbound}, has_text={bool(payload.message_text)}")
+        # Check if it's an inbound message
+        if not payload.is_inbound:
+            logger.info(f"Skipping: not inbound message")
+            return
+
+        # Get message content - either text or transcribed audio
+        message_content = payload.message_text
+        message_type = payload.message_type
+
+        # Handle audio messages - transcribe them
+        if message_type in ["audio", "ptt"] and payload.media_url:
+            logger.info(f"[AUDIO] Transcribing audio message from {payload.sender_phone}")
+            try:
+                transcribed_text = await audio_transcription.transcribe_url(
+                    audio_url=payload.media_url,
+                    language="pt"
+                )
+                if transcribed_text:
+                    message_content = transcribed_text
+                    logger.info(f"[AUDIO] Transcribed: {transcribed_text[:100]}...")
+                else:
+                    message_content = "[Áudio não pôde ser transcrito]"
+                    logger.warning(f"[AUDIO] Failed to transcribe audio from {payload.sender_phone}")
+            except Exception as e:
+                logger.exception(f"[AUDIO] Error transcribing audio: {e}")
+                message_content = "[Áudio não pôde ser transcrito]"
+
+        # Skip if no content
+        if not message_content:
+            logger.info(f"Skipping: no message content (type={message_type})")
             return
 
         sender_phone = payload.sender_phone
@@ -229,12 +257,12 @@ async def add_to_buffer(
             start_node_id=start_node_id
         )
 
-        # Save inbound message immediately
+        # Save inbound message immediately (use transcribed content for audio)
         await db.save_inbound_message(
             conversation_id=conversation.id,
             lead_id=lead.id,
-            content=payload.message_text,
-            message_type=payload.message_type,
+            content=message_content,
+            message_type=message_type,
             media_url=payload.media_url,
             uazapi_message_id=payload.message_id
         )
@@ -253,17 +281,18 @@ async def add_to_buffer(
                 metadata=metadata
             )
 
-        # Add to buffer
+        # Add to buffer (use transcribed content for audio)
         await buffer_service.add_message(
             company_id=company_id,
             lead_id=lead.id,
-            content=payload.message_text,
-            message_type=payload.message_type,
+            content=message_content,
+            message_type=message_type,
             media_url=payload.media_url,
             metadata={
                 "sender_phone": sender_phone,
                 "sender_name": payload.sender_name,
                 "message_id": payload.message_id,
+                "is_transcribed": message_type in ["audio", "ptt"],
             },
             callback=buffer_callback
         )
