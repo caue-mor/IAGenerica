@@ -40,7 +40,7 @@ export default function SignUpPage() {
       <div className="bg-white rounded-2xl shadow-xl p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Criar conta</h1>
-          <p className="text-gray-600">Comece a usar o IA Generica agora</p>
+          <p className="text-gray-600">Comece a usar o NexAI agora</p>
         </div>
 
         {error && (

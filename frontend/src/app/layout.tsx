@@ -6,7 +6,7 @@ import { AuthProvider } from '@/contexts/auth-context';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'IA Generica - Dashboard',
+  title: 'NexAI - Dashboard',
   description: 'Sistema de atendimento automatizado com IA',
 };
 

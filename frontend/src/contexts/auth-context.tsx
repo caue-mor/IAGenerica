@@ -20,7 +20,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Default user - no auth required
 const DEFAULT_USER: User = {
   id: 'default-user',
-  email: 'admin@iagenerica.com',
+  email: 'admin@nexai.com',
   company_id: 1
 };
 
