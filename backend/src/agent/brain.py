@@ -263,11 +263,11 @@ class AIBrain:
 
     def _build_conversation_metrics(self, memory: UnifiedMemory) -> ConversationMetrics:
         """Build conversation metrics from memory for scoring."""
-        interactions = memory.recent_interactions
+        interactions = memory.interaction_history
 
-        # Count messages
-        lead_messages = sum(1 for i in interactions if i.role == "user")
-        agent_messages = sum(1 for i in interactions if i.role == "assistant")
+        # Count messages (each Interaction has user_message and ai_response)
+        lead_messages = sum(1 for i in interactions if i.user_message)
+        agent_messages = sum(1 for i in interactions if i.ai_response)
 
         # Calculate response times (simplified)
         avg_response_time = 30  # Default
@@ -275,14 +275,14 @@ class AIBrain:
         # Count questions from lead
         questions_count = sum(
             1 for i in interactions
-            if i.role == "user" and "?" in i.content
+            if i.user_message and "?" in i.user_message
         )
 
         # Get sentiment history
         sentiments = [str(i.sentiment.value) if i.sentiment else "neutral" for i in interactions]
 
         return ConversationMetrics(
-            total_messages=len(interactions),
+            total_messages=len(interactions) * 2,  # Each interaction has user + agent message
             lead_messages=lead_messages,
             agent_messages=agent_messages,
             avg_response_time_seconds=avg_response_time,
