@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..core.config import settings
 from ..services.followup_scheduler import followup_scheduler
 from ..services.notification import notification_service
+from ..services.enhanced_followup import enhanced_followup
 from ..middleware.rate_limiter import rate_limiter, rate_limit_middleware
 from .routes import (
     webhook_router,
@@ -18,7 +19,9 @@ from .routes import (
     voice_router,
     lead_statuses_router,
     conversations_router,
-    analytics_router
+    analytics_router,
+    proposals_router,
+    documents_router
 )
 
 # Configure logging
@@ -66,6 +69,8 @@ def create_app() -> FastAPI:
     app.include_router(whatsapp_connect_router)  # WhatsApp connection management (new)
     app.include_router(voice_router, prefix="/api")  # Voice/TTS service
     app.include_router(analytics_router, prefix="/api")  # Analytics and metrics
+    app.include_router(proposals_router, prefix="/api")  # Proposal management
+    app.include_router(documents_router, prefix="/api")  # Document extraction
 
     @app.get("/")
     async def root():
@@ -98,6 +103,10 @@ def create_app() -> FastAPI:
         await rate_limiter.start_cleanup_task()
         logger.info("Rate limiter cleanup task started")
 
+        # Start the enhanced follow-up scheduler
+        await enhanced_followup.start_scheduler()
+        logger.info("Enhanced follow-up scheduler started")
+
     @app.on_event("shutdown")
     async def shutdown():
         """Shutdown event"""
@@ -114,6 +123,10 @@ def create_app() -> FastAPI:
         # Stop rate limiter cleanup
         await rate_limiter.stop_cleanup_task()
         logger.info("Rate limiter cleanup stopped")
+
+        # Stop the enhanced follow-up scheduler
+        await enhanced_followup.stop_scheduler()
+        logger.info("Enhanced follow-up scheduler stopped")
 
     return app
 

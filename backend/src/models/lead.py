@@ -32,11 +32,18 @@ class Lead(BaseModel):
     memory: dict[str, Any] = {}  # Long-term AI memory for the lead
     ai_enabled: bool = True
     origem: Optional[str] = None
+    # Proposal tracking
+    proposta_ativa_id: Optional[int] = None  # Active proposal ID for this lead
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+    @property
+    def has_active_proposal(self) -> bool:
+        """Check if lead has an active proposal"""
+        return self.proposta_ativa_id is not None
 
 
 class LeadCreate(BaseModel):
@@ -60,6 +67,7 @@ class LeadUpdate(BaseModel):
     memory: Optional[dict[str, Any]] = None  # Long-term AI memory
     ai_enabled: Optional[bool] = None
     origem: Optional[str] = None
+    proposta_ativa_id: Optional[int] = None  # Active proposal ID
 
 
 class LeadInfo(BaseModel):
@@ -70,6 +78,7 @@ class LeadInfo(BaseModel):
     dados_coletados: dict[str, Any] = {}
     memory: dict[str, Any] = {}  # Long-term AI memory
     ai_enabled: bool = True
+    proposta_ativa_id: Optional[int] = None  # Active proposal ID
 
     @classmethod
     def from_lead(cls, lead: Lead) -> "LeadInfo":
@@ -79,8 +88,14 @@ class LeadInfo(BaseModel):
             celular=lead.celular,
             dados_coletados=lead.dados_coletados,
             memory=lead.memory or {},
-            ai_enabled=lead.ai_enabled
+            ai_enabled=lead.ai_enabled,
+            proposta_ativa_id=lead.proposta_ativa_id
         )
+
+    @property
+    def has_active_proposal(self) -> bool:
+        """Check if lead has an active proposal"""
+        return self.proposta_ativa_id is not None
 
 
 class Conversation(BaseModel):

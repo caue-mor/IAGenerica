@@ -39,6 +39,11 @@ from .brain import AIBrain, CompanyContext, BrainDecision, ResponseAction
 from .goal_tracker import GoalTracker, ExtractionResult
 from .checkpointer import SupabaseCheckpointSaver, create_checkpointer
 
+# Router and Proposal Agent
+from .router import agent_router, AgentType, RoutingDecision
+from .proposal_agent import proposal_agent, ProposalDecision
+from ..services.proposal_service import proposal_service
+
 # Legacy imports for backward compatibility
 from .state import (
     AgentState,
@@ -110,6 +115,7 @@ class IntelligentConversationGraph:
         # Add nodes
         graph.add_node("router", self._router_node)
         graph.add_node("intelligent_processor", self._intelligent_processor_node)
+        graph.add_node("proposal_processor", self._proposal_processor_node)
         graph.add_node("agent", self._agent_node)
         graph.add_node("tools", ToolNode(self.tools))
         graph.add_node("response_formatter", self._response_formatter_node)
@@ -123,6 +129,7 @@ class IntelligentConversationGraph:
             self._route_decision,
             {
                 "intelligent_processor": "intelligent_processor",
+                "proposal_processor": "proposal_processor",
                 "agent": "agent",
                 "end": END
             }
@@ -144,6 +151,9 @@ class IntelligentConversationGraph:
         # Intelligent processor goes to response formatter
         graph.add_edge("intelligent_processor", "response_formatter")
 
+        # Proposal processor goes to response formatter
+        graph.add_edge("proposal_processor", "response_formatter")
+
         # Response formatter ends the graph
         graph.add_edge("response_formatter", END)
 
@@ -158,6 +168,7 @@ class IntelligentConversationGraph:
         Router node - decides the execution path.
 
         Routes to:
+        - proposal_processor: If lead has active proposal (closing mode)
         - intelligent_processor: If there's an active flow (uses new architecture)
         - agent: For free conversation without flow
         - end: If AI is disabled or requires human
@@ -174,6 +185,14 @@ class IntelligentConversationGraph:
             logger.info("[ROUTER] Requires human - routing to end")
             return {"next_node": "end"}
 
+        # Check if lead has active proposal - use proposal processor (closing mode)
+        lead_data = state.get("lead_data", {})
+        proposta_ativa_id = lead_data.get("proposta_ativa_id") or state.get("proposta_ativa_id")
+
+        if proposta_ativa_id:
+            logger.info(f"[ROUTER] Active proposal {proposta_ativa_id} detected - routing to proposal_processor")
+            return {"next_node": "proposal_processor", "proposta_ativa_id": proposta_ativa_id}
+
         # Check if there's an active flow - use intelligent processor
         flow_config = state.get("flow_config")
         if flow_config:
@@ -186,7 +205,11 @@ class IntelligentConversationGraph:
 
     def _route_decision(self, state: AgentState) -> str:
         """Determine the next node based on router output."""
-        return state.get("next_node", "intelligent_processor")
+        next_node = state.get("next_node", "intelligent_processor")
+        # Valid nodes: intelligent_processor, proposal_processor, agent, end
+        if next_node in ["intelligent_processor", "proposal_processor", "agent", "end"]:
+            return next_node
+        return "intelligent_processor"
 
     def _should_use_tools(self, state: AgentState) -> str:
         """Determine if the agent should use tools."""
@@ -389,6 +412,139 @@ class IntelligentConversationGraph:
         except Exception as e:
             logger.error(f"[INTELLIGENT] Error: {e}", exc_info=True)
             result["response"] = "Desculpe, ocorreu um erro. Pode repetir?"
+            result["error"] = str(e)
+
+        return result
+
+    async def _proposal_processor_node(self, state: AgentState) -> dict[str, Any]:
+        """
+        Proposal processor node - handles conversations when lead has active proposal.
+
+        This specialized processor:
+        1. Loads the active proposal
+        2. Uses ProposalAgent for objection handling
+        3. Detects buying signals
+        4. Notifies company at critical moments
+        5. Never offers discounts (company policy)
+        """
+        logger.info("[PROPOSAL] Processing with Proposal Agent (closing mode)")
+
+        result = {}
+
+        try:
+            # Get identifiers
+            lead_id = state.get("lead_id")
+            conversation_id = state.get("conversation_id")
+            company_config = state.get("company_config", {})
+            company_id = state.get("company_id")
+            proposta_ativa_id = state.get("proposta_ativa_id")
+
+            # Get user message
+            user_message = self._get_last_user_message(state)
+            if not user_message:
+                return {"response": "Como posso ajudar com a proposta?"}
+
+            # Load the active proposal
+            if not proposta_ativa_id:
+                lead_data = state.get("lead_data", {})
+                proposta_ativa_id = lead_data.get("proposta_ativa_id")
+
+            if not proposta_ativa_id:
+                # No active proposal - fallback to intelligent processor
+                logger.warning("[PROPOSAL] No active proposal found, falling back")
+                return await self._intelligent_processor_node(state)
+
+            proposal = await proposal_service.get_proposal(proposta_ativa_id)
+            if not proposal:
+                logger.warning(f"[PROPOSAL] Proposal {proposta_ativa_id} not found")
+                return await self._intelligent_processor_node(state)
+
+            # Load memory
+            try:
+                memory = await self.memory_manager.load_memory(lead_id, conversation_id)
+            except ValueError:
+                memory = UnifiedMemory(
+                    lead_id=lead_id,
+                    conversation_id=conversation_id,
+                    collected_data=state.get("lead_data", {})
+                )
+
+            # Process with Proposal Agent
+            decision: ProposalDecision = await proposal_agent.process(
+                user_message=user_message,
+                proposal=proposal,
+                memory=memory,
+                company_name=company_config.get("company_name", "Empresa"),
+                agent_name=company_config.get("agent_name", "Consultor")
+            )
+
+            # Set response
+            result["response"] = decision.response
+
+            # Handle handoff
+            if decision.should_handoff:
+                result["requires_human"] = True
+                result["handoff_reason"] = decision.handoff_reason
+                result["ai_enabled"] = False
+
+                # Disable AI in database
+                await db.set_conversation_ai(conversation_id, False)
+                await db.set_lead_ai(lead_id, False)
+
+                # Send handoff notification
+                await notification_service.notify_handoff(
+                    company_id=company_id,
+                    lead_id=lead_id,
+                    lead_name=memory.collected_data.get("nome"),
+                    reason=decision.handoff_reason
+                )
+                logger.info(f"[PROPOSAL] Handoff requested: {decision.handoff_reason}")
+
+            # Handle proposal actions
+            if decision.proposal_action == "accept":
+                await proposal_service.accept_proposal(proposal.id)
+                logger.info(f"[PROPOSAL] Lead accepted proposal {proposal.id}")
+
+            elif decision.proposal_action == "reject":
+                # Don't immediately reject - the agent tried to save the deal
+                # Mark as negotiating to give more chances
+                await proposal_service.mark_negotiating(
+                    proposal.id,
+                    f"Lead indicated rejection intent: {user_message}"
+                )
+                logger.info(f"[PROPOSAL] Lead showing rejection signals for proposal {proposal.id}")
+
+            # Send notifications for critical moments
+            if decision.should_notify:
+                await proposal_agent.notify_critical_moment(
+                    company_id=company_id,
+                    lead_id=lead_id,
+                    proposal=proposal,
+                    notification_message=decision.notification_message,
+                    priority=decision.notification_priority
+                )
+                logger.info(f"[PROPOSAL] Critical moment notification sent")
+
+            # Update memory
+            memory.add_interaction(
+                user_message=user_message,
+                ai_response=decision.response,
+                extracted_data={},
+                sentiment=Sentiment.NEUTRAL,
+                topics=["proposal_negotiation"]
+            )
+            await self.memory_manager.save_memory(memory)
+
+            # Log signals
+            if decision.signals:
+                logger.info(f"[PROPOSAL] Signals detected: {[s.value for s in decision.signals]}")
+
+            if decision.objection_detected:
+                logger.info(f"[PROPOSAL] Objection detected: {decision.objection_detected.value}")
+
+        except Exception as e:
+            logger.error(f"[PROPOSAL] Error: {e}", exc_info=True)
+            result["response"] = "Desculpe, ocorreu um erro. Posso ajudar com a proposta de outra forma?"
             result["error"] = str(e)
 
         return result
@@ -619,6 +775,11 @@ async def invoke_agent(
         flow_config=flow_config,
         current_node_id=conversation.current_node_id
     )
+
+    # Add active proposal ID if present (for Proposal Agent routing)
+    if lead.proposta_ativa_id:
+        state["proposta_ativa_id"] = lead.proposta_ativa_id
+        logger.info(f"[INVOKE] Lead has active proposal: {lead.proposta_ativa_id}")
 
     # Load context from conversation
     conv_context = conversation.context or {}

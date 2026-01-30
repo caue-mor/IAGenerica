@@ -7,6 +7,8 @@ from .voice import router as voice_router
 from .lead_statuses import router as lead_statuses_router
 from .conversations import router as conversations_router
 from .analytics import router as analytics_router
+from .proposals import router as proposals_router
+from .documents import router as documents_router
 
 __all__ = [
     "webhook_router",
@@ -17,5 +19,7 @@ __all__ = [
     "voice_router",
     "lead_statuses_router",
     "conversations_router",
-    "analytics_router"
+    "analytics_router",
+    "proposals_router",
+    "documents_router"
 ]

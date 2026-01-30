@@ -26,6 +26,16 @@ from .flow import (
     create_sales_flow
 )
 from .webhook import WebhookPayload, WebhookMessage, WebhookSender, parse_webhook
+from .proposal import (
+    Proposal, ProposalCreate, ProposalUpdate, ProposalInfo,
+    ProposalStatus, ProposalSend, ProposalResponse, ProposalView
+)
+from .followup import (
+    Followup, FollowupCreate, FollowupUpdate,
+    FollowupStatus, FollowupStage, FollowupReason,
+    FollowupScheduleRequest, FollowupTemplate,
+    STAGE_HOURS, DEFAULT_TEMPLATES, get_template
+)
 
 __all__ = [
     # Company
@@ -47,5 +57,15 @@ __all__ = [
     "create_default_flow", "create_sales_flow",
 
     # Webhook
-    "WebhookPayload", "WebhookMessage", "WebhookSender", "parse_webhook"
+    "WebhookPayload", "WebhookMessage", "WebhookSender", "parse_webhook",
+
+    # Proposal
+    "Proposal", "ProposalCreate", "ProposalUpdate", "ProposalInfo",
+    "ProposalStatus", "ProposalSend", "ProposalResponse", "ProposalView",
+
+    # Followup
+    "Followup", "FollowupCreate", "FollowupUpdate",
+    "FollowupStatus", "FollowupStage", "FollowupReason",
+    "FollowupScheduleRequest", "FollowupTemplate",
+    "STAGE_HOURS", "DEFAULT_TEMPLATES", "get_template"
 ]

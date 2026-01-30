@@ -95,6 +95,27 @@ from .checkpointer import (
     get_migration_sql
 )
 
+# Agent Router
+from .router import (
+    AgentRouter,
+    AgentType,
+    RoutingContext,
+    RoutingDecision,
+    agent_router,
+    route_conversation,
+    should_use_proposal_agent
+)
+
+# Proposal Agent
+from .proposal_agent import (
+    ProposalAgent,
+    ProposalSignal,
+    ObjectionType,
+    ProposalDecision,
+    proposal_agent,
+    create_proposal_agent
+)
+
 from .tools import (
     all_tools,
     get_all_tools,
@@ -178,6 +199,23 @@ __all__ = [
     "SupabaseCheckpointSaver",
     "create_checkpointer",
     "get_migration_sql",
+
+    # Agent Router
+    "AgentRouter",
+    "AgentType",
+    "RoutingContext",
+    "RoutingDecision",
+    "agent_router",
+    "route_conversation",
+    "should_use_proposal_agent",
+
+    # Proposal Agent
+    "ProposalAgent",
+    "ProposalSignal",
+    "ObjectionType",
+    "ProposalDecision",
+    "proposal_agent",
+    "create_proposal_agent",
 
     # State (legacy)
     "AgentState",

@@ -62,6 +62,30 @@ from .openai_tts import (
     create_openai_tts_service
 )
 
+# Proposal Service
+from .proposal_service import (
+    proposal_service,
+    ProposalService
+)
+
+# Document Extractor
+from .document_extractor import (
+    document_extractor,
+    DocumentExtractor,
+    DocumentType,
+    ExtractedField,
+    ExtractionResult,
+    extract_document
+)
+
+# Enhanced Followup Service
+from .enhanced_followup import (
+    enhanced_followup,
+    EnhancedFollowupService,
+    schedule_inactivity_followup,
+    cancel_followups_for_lead
+)
+
 
 __all__ = [
     # Database
@@ -122,4 +146,22 @@ __all__ = [
     "openai_tts",
     "OpenAITTSService",
     "create_openai_tts_service",
+
+    # Proposal Service
+    "proposal_service",
+    "ProposalService",
+
+    # Document Extractor
+    "document_extractor",
+    "DocumentExtractor",
+    "DocumentType",
+    "ExtractedField",
+    "ExtractionResult",
+    "extract_document",
+
+    # Enhanced Followup Service
+    "enhanced_followup",
+    "EnhancedFollowupService",
+    "schedule_inactivity_followup",
+    "cancel_followups_for_lead",
 ]

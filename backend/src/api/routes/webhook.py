@@ -12,6 +12,7 @@ from ...services.whatsapp import create_whatsapp_service
 from ...services.buffer import message_buffer, MessageBufferService
 from ...services.notification import notification_service
 from ...services.audio_transcription import audio_transcription
+from ...services.enhanced_followup import enhanced_followup
 from ...agent import invoke_agent
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,75 @@ async def send_response(
         logger.exception(f"Error sending response: {e}")
 
 
+async def handle_human_takeover(
+    company_id: int,
+    payload: WebhookPayload
+):
+    """
+    Handle human takeover when company sends a message manually.
+
+    When the company sends a message manually (not via API), it means
+    a human is taking over the conversation. The AI should be disabled
+    for this conversation to prevent interference.
+    """
+    try:
+        # Try to extract recipient phone from the message
+        # For outbound messages, chatid is the recipient
+        recipient_phone = None
+        if payload.message and isinstance(payload.message, dict):
+            chatid = payload.message.get("chatid")
+            if chatid:
+                # Extract phone from chatid (e.g., "5511999999999@s.whatsapp.net")
+                recipient_phone = chatid.split("@")[0].replace("+", "").replace("-", "").replace(" ", "")
+
+        if not recipient_phone:
+            logger.warning("[HUMAN TAKEOVER] Could not extract recipient phone")
+            return
+
+        # Find the lead by phone number
+        lead = await db.get_lead_by_phone(company_id, recipient_phone)
+        if not lead:
+            logger.info(f"[HUMAN TAKEOVER] No lead found for phone {recipient_phone}")
+            return
+
+        # Find the conversation
+        thread_id = f"wa_{recipient_phone}"
+        conversation = await db.get_conversation_by_thread(thread_id)
+
+        if not conversation:
+            logger.info(f"[HUMAN TAKEOVER] No conversation found for thread {thread_id}")
+            return
+
+        # Check if AI is already disabled
+        if not conversation.ai_enabled:
+            logger.info(f"[HUMAN TAKEOVER] AI already disabled for conversation {conversation.id}")
+            return
+
+        # Disable AI for this conversation
+        await db.set_conversation_ai(conversation.id, enabled=False)
+        logger.info(f"[HUMAN TAKEOVER] AI disabled for conversation {conversation.id} (lead: {lead.nome or recipient_phone})")
+
+        # Optionally send notification to team
+        try:
+            await notification_service.send_notification(
+                company_id=company_id,
+                title="Atendimento Manual Iniciado",
+                message=f"Um atendente assumiu a conversa com {lead.nome or recipient_phone}. A IA foi desativada.",
+                notification_type="human_takeover",
+                metadata={
+                    "lead_id": lead.id,
+                    "lead_name": lead.nome,
+                    "lead_phone": recipient_phone,
+                    "conversation_id": conversation.id
+                }
+            )
+        except Exception as e:
+            logger.debug(f"[HUMAN TAKEOVER] Could not send notification: {e}")
+
+    except Exception as e:
+        logger.exception(f"[HUMAN TAKEOVER] Error handling human takeover: {e}")
+
+
 async def add_to_buffer(
     company_id: int,
     payload: WebhookPayload
@@ -178,6 +248,13 @@ async def add_to_buffer(
         company = await db.get_company(company_id)
         if not company:
             logger.error(f"Company {company_id} not found")
+            return
+
+        # Check if it's a MANUAL outbound message (company sent via WhatsApp, not API)
+        # This indicates human takeover - disable AI for this conversation
+        if payload.is_manual_outbound:
+            logger.info(f"[HUMAN TAKEOVER] Manual outbound message detected from company")
+            await handle_human_takeover(company_id, payload)
             return
 
         # Check if it's an inbound message
@@ -266,6 +343,17 @@ async def add_to_buffer(
             media_url=payload.media_url,
             uazapi_message_id=payload.message_id
         )
+
+        # Cancel any pending follow-ups since the lead responded
+        try:
+            cancelled = await enhanced_followup.cancel_for_lead(
+                lead_id=lead.id,
+                reason="Lead responded to conversation"
+            )
+            if cancelled > 0:
+                logger.info(f"[FOLLOWUP] Cancelled {cancelled} pending follow-ups for lead {lead.id}")
+        except Exception as e:
+            logger.warning(f"[FOLLOWUP] Error cancelling follow-ups: {e}")
 
         # Check if AI is enabled - if not, don't buffer
         if not conversation.ai_enabled or not lead.ai_enabled:
