@@ -6,6 +6,7 @@ from .whatsapp_connect import router as whatsapp_connect_router
 from .voice import router as voice_router
 from .lead_statuses import router as lead_statuses_router
 from .conversations import router as conversations_router
+from .analytics import router as analytics_router
 
 __all__ = [
     "webhook_router",
@@ -15,5 +16,6 @@ __all__ = [
     "whatsapp_connect_router",
     "voice_router",
     "lead_statuses_router",
-    "conversations_router"
+    "conversations_router",
+    "analytics_router"
 ]

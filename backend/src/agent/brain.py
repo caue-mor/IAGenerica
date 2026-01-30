@@ -6,6 +6,8 @@ This module provides the central intelligence that:
 - Decides what to do next
 - Generates natural, contextual responses
 - Extracts data intelligently from conversation
+- Validates data before accepting
+- Calculates lead scores
 
 The AI Brain receives CONTEXT, not SCRIPTS. It decides HOW to achieve goals naturally.
 """
@@ -15,7 +17,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 from enum import Enum
 
 from langchain_openai import ChatOpenAI
@@ -24,6 +26,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from .memory import UnifiedMemory, Sentiment
 from .flow_interpreter import FlowIntent, ConversationGoal
 from .goal_tracker import GoalTracker, ExtractionResult
+from .validators import DataValidator, ValidationResult
+from .lead_scorer import LeadScorer, LeadScore, LeadTemperature, ConversationMetrics
+from .flow_navigator import FlowGraphNavigator, FlowContext
 from ..core.config import settings
 
 
@@ -64,6 +69,11 @@ class BrainDecision:
     next_goal: Optional[str] = None
     confidence: float = 0.0
     reasoning: str = ""
+    # Lead scoring
+    lead_score: Optional[LeadScore] = None
+    lead_temperature: Optional[LeadTemperature] = None
+    # Validation errors
+    validation_errors: Dict[str, str] = field(default_factory=dict)
 
 
 class AIBrain:
@@ -75,20 +85,23 @@ class AIBrain:
     - Complete memory (conversation + lead history)
     - Goals from flow (what to collect)
     - Company context
+    - Flow navigator for graph-based navigation
 
     And decides:
     - What the user said/wanted
     - What data can be extracted
     - How to respond naturally
     - Whether to handoff/notify
+    - Lead score and temperature
     """
 
-    def __init__(self, model_name: str = None):
+    def __init__(self, model_name: str = None, company_weights: Dict[str, int] = None):
         """
         Initialize AIBrain.
 
         Args:
             model_name: OpenAI model to use (default from settings)
+            company_weights: Custom lead scoring weights for this company
         """
         self.model = ChatOpenAI(
             model=model_name or settings.OPENAI_MODEL,
@@ -101,13 +114,21 @@ class AIBrain:
             api_key=settings.OPENAI_API_KEY
         )
 
+        # Initialize validator and scorer
+        self.validator = DataValidator()
+        self.lead_scorer = LeadScorer(company_weights)
+
+        # Track validation errors for retry prompts
+        self.pending_validation_errors: Dict[str, str] = {}
+
     async def process(
         self,
         user_message: str,
         memory: UnifiedMemory,
         flow_intent: FlowIntent,
         company_context: CompanyContext,
-        goal_tracker: GoalTracker
+        goal_tracker: GoalTracker,
+        flow_navigator: FlowGraphNavigator = None
     ) -> BrainDecision:
         """
         Process user message with full context and decide response.
@@ -118,27 +139,46 @@ class AIBrain:
             flow_intent: Interpreted flow with goals
             company_context: Company information
             goal_tracker: Goal progress tracker
+            flow_navigator: Optional flow graph navigator for intelligent navigation
 
         Returns:
             BrainDecision with response and actions
         """
         # Step 1: Understand user intent and extract data
-        extractions = await self._extract_data(user_message, flow_intent, memory)
+        raw_extractions = await self._extract_data(user_message, flow_intent, memory)
 
-        # Step 2: Update goal tracker with extractions
+        # Step 2: Validate extracted data
+        extractions, validation_errors = self._validate_extractions(raw_extractions)
+        self.pending_validation_errors = validation_errors
+
+        # Step 3: Update goal tracker with valid extractions
         if extractions:
             goal_tracker.update_from_extractions(extractions)
 
-        # Step 3: Detect sentiment and intent
+        # Step 4: Update flow navigator with collected data
+        if flow_navigator and extractions:
+            new_data = {e.field: e.value for e in extractions}
+            flow_navigator.update_collected_data(new_data)
+            # Try to advance in the flow
+            flow_navigator.evaluate_and_advance()
+
+        # Step 5: Detect sentiment and intent
         sentiment = await self._detect_sentiment(user_message)
         user_intent = await self._detect_intent(user_message)
 
-        # Step 4: Check if handoff is needed
-        should_handoff, handoff_reason = self._check_handoff(
-            user_intent, sentiment, goal_tracker, memory
+        # Step 6: Calculate lead score
+        conversation_metrics = self._build_conversation_metrics(memory)
+        lead_score = self.lead_scorer.calculate_score(
+            memory.collected_data,
+            conversation_metrics
         )
 
-        # Step 5: Generate natural response
+        # Step 7: Check if handoff is needed (including score-based handoff)
+        should_handoff, handoff_reason = self._check_handoff(
+            user_intent, sentiment, goal_tracker, memory, lead_score
+        )
+
+        # Step 8: Generate natural response (include validation errors if any)
         response = await self._generate_response(
             user_message=user_message,
             memory=memory,
@@ -146,17 +186,24 @@ class AIBrain:
             company_context=company_context,
             goal_tracker=goal_tracker,
             extractions=extractions,
-            user_intent=user_intent
+            user_intent=user_intent,
+            validation_errors=validation_errors,
+            flow_navigator=flow_navigator
         )
 
-        # Step 6: Determine next goal
+        # Step 9: Determine next goal
         next_goal = goal_tracker.get_next_goal_to_collect()
 
-        # Step 7: Check for notifications
+        # Step 10: Check for notifications (including score-based)
         should_notify = False
         notification_type = ""
         notifications = goal_tracker.get_notifications_to_send()
-        if notifications:
+
+        # Add notification for hot leads
+        if lead_score.temperature == LeadTemperature.HOT and not should_notify:
+            should_notify = True
+            notification_type = "lead_hot"
+        elif notifications:
             should_notify = True
             notification_type = notifications[0].trigger
 
@@ -172,7 +219,76 @@ class AIBrain:
             notification_type=notification_type,
             next_goal=next_goal.field_name if next_goal else None,
             confidence=0.9,
-            reasoning=f"Intent: {user_intent}, Extracted: {len(extractions)} fields"
+            reasoning=f"Intent: {user_intent}, Extracted: {len(extractions)} fields, Score: {lead_score.total}",
+            lead_score=lead_score,
+            lead_temperature=lead_score.temperature,
+            validation_errors=validation_errors
+        )
+
+    def _validate_extractions(
+        self,
+        extractions: list[ExtractionResult]
+    ) -> tuple[list[ExtractionResult], Dict[str, str]]:
+        """
+        Validate extracted data and filter out invalid values.
+
+        Args:
+            extractions: Raw extraction results
+
+        Returns:
+            Tuple of (valid_extractions, validation_errors)
+        """
+        valid_extractions = []
+        validation_errors = {}
+
+        for extraction in extractions:
+            result = self.validator.validate(
+                extraction.field,
+                extraction.value,
+                required=False
+            )
+
+            if result.is_valid:
+                # Use cleaned value
+                valid_extractions.append(ExtractionResult(
+                    field=extraction.field,
+                    value=result.cleaned_value or extraction.value,
+                    confidence=extraction.confidence,
+                    source_text=extraction.source_text
+                ))
+            else:
+                validation_errors[extraction.field] = result.error_message
+
+        return valid_extractions, validation_errors
+
+    def _build_conversation_metrics(self, memory: UnifiedMemory) -> ConversationMetrics:
+        """Build conversation metrics from memory for scoring."""
+        interactions = memory.recent_interactions
+
+        # Count messages
+        lead_messages = sum(1 for i in interactions if i.role == "user")
+        agent_messages = sum(1 for i in interactions if i.role == "assistant")
+
+        # Calculate response times (simplified)
+        avg_response_time = 30  # Default
+
+        # Count questions from lead
+        questions_count = sum(
+            1 for i in interactions
+            if i.role == "user" and "?" in i.content
+        )
+
+        # Get sentiment history
+        sentiments = [str(i.sentiment.value) if i.sentiment else "neutral" for i in interactions]
+
+        return ConversationMetrics(
+            total_messages=len(interactions),
+            lead_messages=lead_messages,
+            agent_messages=agent_messages,
+            avg_response_time_seconds=avg_response_time,
+            fields_collected_count=len(memory.collected_data),
+            questions_asked_by_lead=questions_count,
+            sentiment_scores=sentiments
         )
 
     async def _extract_data(
@@ -361,7 +477,8 @@ Se não houver dados para extrair, retorne: []"""
         user_intent: str,
         sentiment: Sentiment,
         goal_tracker: GoalTracker,
-        memory: UnifiedMemory
+        memory: UnifiedMemory,
+        lead_score: LeadScore = None
     ) -> tuple[bool, str]:
         """Check if conversation should be handed off to human."""
         # Explicit request for human
@@ -371,6 +488,14 @@ Se não houver dados para extrair, retorne: []"""
         # Very negative sentiment
         if sentiment == Sentiment.NEGATIVE and memory.conversation_state.retry_count > 2:
             return True, "Cliente insatisfeito após múltiplas tentativas"
+
+        # Hot lead handoff
+        if lead_score and lead_score.temperature == LeadTemperature.HOT:
+            # Check if we have minimum required data
+            has_contact = memory.collected_data.get("telefone") or memory.collected_data.get("email")
+            has_name = memory.collected_data.get("nome")
+            if has_contact and has_name:
+                return True, f"Lead quente (score {lead_score.total}) - pronto para atendimento"
 
         # Check goal tracker for handoff conditions
         should_handoff, reason = goal_tracker.should_handoff()
@@ -387,7 +512,9 @@ Se não houver dados para extrair, retorne: []"""
         company_context: CompanyContext,
         goal_tracker: GoalTracker,
         extractions: list[ExtractionResult],
-        user_intent: str
+        user_intent: str,
+        validation_errors: Dict[str, str] = None,
+        flow_navigator: FlowGraphNavigator = None
     ) -> str:
         """Generate a natural, contextual response."""
         # Build system prompt
@@ -395,7 +522,8 @@ Se não houver dados para extrair, retorne: []"""
             memory=memory,
             flow_intent=flow_intent,
             company_context=company_context,
-            goal_tracker=goal_tracker
+            goal_tracker=goal_tracker,
+            flow_navigator=flow_navigator
         )
 
         # Build user context
@@ -403,7 +531,8 @@ Se não houver dados para extrair, retorne: []"""
             user_message=user_message,
             extractions=extractions,
             user_intent=user_intent,
-            goal_tracker=goal_tracker
+            goal_tracker=goal_tracker,
+            validation_errors=validation_errors
         )
 
         # Get response from LLM
@@ -422,7 +551,8 @@ Se não houver dados para extrair, retorne: []"""
         memory: UnifiedMemory,
         flow_intent: FlowIntent,
         company_context: CompanyContext,
-        goal_tracker: GoalTracker
+        goal_tracker: GoalTracker,
+        flow_navigator: FlowGraphNavigator = None
     ) -> str:
         """Build the system prompt with full context."""
         # Tone descriptions
@@ -450,9 +580,23 @@ Se não houver dados para extrair, retorne: []"""
         goals_status = goal_tracker.format_status_for_prompt()
         pending_goals = flow_intent.format_pending_goals_for_prompt()
 
+        # Flow navigator context (if available)
+        flow_context = ""
+        if flow_navigator:
+            flow_context = f"""
+POSIÇÃO NO FLUXO:
+{flow_navigator.format_context_for_prompt()}
+"""
+
         # Lead name
         lead_name = memory.collected_data.get("nome", "")
         lead_greeting = f"O nome do lead é: {lead_name}. Use o nome dele quando apropriado." if lead_name else ""
+
+        # Lead score context
+        score_context = ""
+        if hasattr(self, 'lead_scorer'):
+            score, temp = self.lead_scorer.quick_score(memory.collected_data)
+            score_context = f"\nSCORE DO LEAD: {score}/100 ({temp.value.upper()})"
 
         return f"""Você é {company_context.agent_name}, assistente virtual da empresa {company_context.company_name}.
 
@@ -471,8 +615,10 @@ HISTÓRICO RECENTE:
 
 OBJETIVOS DO FLUXO:
 {goals_status}
+{score_context}
 
 {pending_goals}
+{flow_context}
 
 REGRAS IMPORTANTES:
 1. SEMPRE reconheça o que o usuário disse PRIMEIRO antes de fazer perguntas
@@ -485,6 +631,7 @@ REGRAS IMPORTANTES:
 8. NÃO calcule frete, preço final ou faça cotações - apenas colete as informações
 9. Quando pedir CEP, explique que é para nosso consultor calcular as melhores opções de entrega
 10. Após coletar todas as informações, avise que um consultor entrará em contato em breve
+11. Se um dado informado for inválido, peça educadamente para o usuário corrigir
 
 INFORMAÇÕES DA EMPRESA:
 {company_context.company_info if company_context.company_info else "Use seu conhecimento geral para responder perguntas sobre a empresa."}
@@ -496,14 +643,23 @@ Responda de forma natural e humana, avançando a conversa para coletar as inform
         user_message: str,
         extractions: list[ExtractionResult],
         user_intent: str,
-        goal_tracker: GoalTracker
+        goal_tracker: GoalTracker,
+        validation_errors: Dict[str, str] = None
     ) -> str:
         """Build the context for processing user message."""
         extraction_text = ""
         if extractions:
-            extraction_text = "\n\nINFORMAÇÕES EXTRAÍDAS DA MENSAGEM:\n" + "\n".join([
+            extraction_text = "\n\nINFORMAÇÕES EXTRAÍDAS E VALIDADAS:\n" + "\n".join([
                 f"- {e.field}: {e.value} (confiança: {e.confidence:.0%})"
                 for e in extractions
+            ])
+
+        # Add validation errors
+        validation_text = ""
+        if validation_errors:
+            validation_text = "\n\nERROS DE VALIDAÇÃO (peça para o usuário corrigir):\n" + "\n".join([
+                f"- {field}: {error}"
+                for field, error in validation_errors.items()
             ])
 
         next_goal = goal_tracker.get_next_goal_to_collect()
@@ -517,9 +673,11 @@ Responda de forma natural e humana, avançando a conversa para coletar as inform
 
 INTENÇÃO DETECTADA: {user_intent}
 {extraction_text}
+{validation_text}
 {next_goal_text}
 
-Responda de forma natural, reconhecendo o que o usuário disse e avançando a conversa."""
+Responda de forma natural, reconhecendo o que o usuário disse e avançando a conversa.
+Se houver erros de validação, peça educadamente para o usuário corrigir antes de prosseguir."""
 
     def _get_fallback_response(self, company_context: CompanyContext, intent: str) -> str:
         """Get a fallback response when LLM fails."""

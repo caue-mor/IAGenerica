@@ -2,11 +2,13 @@
 FastAPI application
 """
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..core.config import settings
 from ..services.followup_scheduler import followup_scheduler
+from ..services.notification import notification_service
+from ..middleware.rate_limiter import rate_limiter, rate_limit_middleware
 from .routes import (
     webhook_router,
     leads_router,
@@ -15,7 +17,8 @@ from .routes import (
     whatsapp_connect_router,
     voice_router,
     lead_statuses_router,
-    conversations_router
+    conversations_router,
+    analytics_router
 )
 
 # Configure logging
@@ -47,6 +50,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Rate limiting middleware
+    @app.middleware("http")
+    async def rate_limiting(request: Request, call_next):
+        """Apply rate limiting to requests."""
+        return await rate_limit_middleware(request, call_next)
+
     # Include routers
     app.include_router(webhook_router)
     app.include_router(leads_router, prefix="/api")
@@ -56,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(whatsapp_router)  # WhatsApp/UAZAPI management (legacy)
     app.include_router(whatsapp_connect_router)  # WhatsApp connection management (new)
     app.include_router(voice_router, prefix="/api")  # Voice/TTS service
+    app.include_router(analytics_router, prefix="/api")  # Analytics and metrics
 
     @app.get("/")
     async def root():
@@ -80,6 +90,14 @@ def create_app() -> FastAPI:
         await followup_scheduler.start_scheduler()
         logger.info("Follow-up scheduler started")
 
+        # Start the notification delivery worker
+        await notification_service.start_worker()
+        logger.info("Notification worker started")
+
+        # Start rate limiter cleanup task
+        await rate_limiter.start_cleanup_task()
+        logger.info("Rate limiter cleanup task started")
+
     @app.on_event("shutdown")
     async def shutdown():
         """Shutdown event"""
@@ -88,6 +106,14 @@ def create_app() -> FastAPI:
         # Stop the follow-up scheduler
         await followup_scheduler.stop_scheduler()
         logger.info("Follow-up scheduler stopped")
+
+        # Stop the notification worker
+        await notification_service.stop_worker()
+        logger.info("Notification worker stopped")
+
+        # Stop rate limiter cleanup
+        await rate_limiter.stop_cleanup_task()
+        logger.info("Rate limiter cleanup stopped")
 
     return app
 

@@ -1,7 +1,14 @@
 """
 Notification Service
 Sends notifications to team members about important events via WhatsApp
+
+Enhanced with:
+- Supabase persistence
+- Retry with exponential backoff
+- Multiple delivery channels
+- Notification queue management
 """
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -10,6 +17,7 @@ from enum import Enum
 import httpx
 
 from .database import db
+from ..core.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +44,25 @@ class NotificationPriority(str, Enum):
     URGENT = "urgent"
 
 
+class NotificationChannel(str, Enum):
+    """Delivery channels for notifications"""
+    IN_APP = "in_app"
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+    SLACK = "slack"
+    WEBHOOK = "webhook"
+
+
+class NotificationStatus(str, Enum):
+    """Status of a notification"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    READ = "read"
+
+
 @dataclass
 class Notification:
     """Represents a notification"""
@@ -45,28 +72,112 @@ class Notification:
     title: str
     message: str
     lead_id: Optional[int] = None
+    conversation_id: Optional[int] = None
     data: Dict[str, Any] = field(default_factory=dict)
     priority: NotificationPriority = NotificationPriority.NORMAL
+    channels: List[NotificationChannel] = field(default_factory=lambda: [NotificationChannel.IN_APP])
+    status: NotificationStatus = NotificationStatus.PENDING
+    delivery_attempts: int = 0
+    max_delivery_attempts: int = 3
+    last_error: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
-    read: bool = False
-    read_at: Optional[datetime] = None
-    delivered: bool = False
+    scheduled_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    read_at: Optional[datetime] = None
+
+    @property
+    def read(self) -> bool:
+        return self.status == NotificationStatus.READ
+
+    @property
+    def delivered(self) -> bool:
+        return self.status in [NotificationStatus.DELIVERED, NotificationStatus.READ]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "company_id": self.company_id,
+            "type": self.notification_type.value,
+            "title": self.title,
+            "message": self.message,
+            "lead_id": self.lead_id,
+            "conversation_id": self.conversation_id,
+            "metadata": self.data,
+            "priority": self.priority.value,
+            "channels": [c.value for c in self.channels],
+            "status": self.status.value,
+            "delivery_attempts": self.delivery_attempts,
+            "last_error": self.last_error,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "delivered_at": self.delivered_at.isoformat() if self.delivered_at else None,
+            "read_at": self.read_at.isoformat() if self.read_at else None,
+        }
 
 
 class NotificationService:
     """
     Service for sending and managing notifications.
 
-    Supports internal notifications and external webhooks.
+    Supports:
+    - Supabase persistence
+    - Multiple delivery channels
+    - Retry with exponential backoff
+    - External webhooks
     """
 
-    def __init__(self):
-        """Initialize the notification service"""
-        self.notifications: Dict[int, Notification] = {}
+    TABLE_NAME = "iagenericanexma_notifications"
+
+    def __init__(self, use_persistence: bool = True):
+        """
+        Initialize the notification service.
+
+        Args:
+            use_persistence: Whether to persist notifications to Supabase
+        """
+        self.use_persistence = use_persistence
+        self.notifications: Dict[int, Notification] = {}  # In-memory cache
         self._next_id = 1
         self.webhooks: Dict[int, str] = {}  # company_id -> webhook_url
         self.webhook_secrets: Dict[int, str] = {}  # company_id -> secret
+        self._supabase = None
+        self._processing_queue: asyncio.Queue = asyncio.Queue()
+        self._worker_task: Optional[asyncio.Task] = None
+
+    @property
+    def supabase(self):
+        """Lazy load Supabase client."""
+        if self._supabase is None:
+            self._supabase = get_supabase_client()
+        return self._supabase
+
+    async def start_worker(self):
+        """Start the notification delivery worker."""
+        if self._worker_task is None:
+            self._worker_task = asyncio.create_task(self._delivery_worker())
+
+    async def stop_worker(self):
+        """Stop the notification delivery worker."""
+        if self._worker_task:
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+            self._worker_task = None
+
+    async def _delivery_worker(self):
+        """Background worker that processes notification delivery."""
+        while True:
+            try:
+                notification = await self._processing_queue.get()
+                await self._process_delivery(notification)
+                self._processing_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in notification worker: {e}")
 
     async def send_notification(
         self,
@@ -75,11 +186,13 @@ class NotificationService:
         title: str,
         message: str,
         lead_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
         data: Optional[Dict[str, Any]] = None,
-        priority: NotificationPriority = NotificationPriority.NORMAL
+        priority: NotificationPriority = NotificationPriority.NORMAL,
+        channels: List[NotificationChannel] = None
     ) -> Notification:
         """
-        Send a notification.
+        Send a notification with persistence and multi-channel support.
 
         Args:
             company_id: Company ID
@@ -87,12 +200,23 @@ class NotificationService:
             title: Notification title
             message: Notification message
             lead_id: Related lead ID (optional)
+            conversation_id: Related conversation ID (optional)
             data: Additional data (optional)
             priority: Priority level
+            channels: Delivery channels (default: based on priority)
 
         Returns:
             Created Notification
         """
+        # Determine channels based on priority if not specified
+        if channels is None:
+            channels = [NotificationChannel.IN_APP]
+            if priority in [NotificationPriority.HIGH, NotificationPriority.URGENT]:
+                channels.append(NotificationChannel.WHATSAPP)
+            if company_id in self.webhooks:
+                channels.append(NotificationChannel.WEBHOOK)
+
+        # Create notification object
         notification = Notification(
             id=self._next_id,
             company_id=company_id,
@@ -100,27 +224,172 @@ class NotificationService:
             title=title,
             message=message,
             lead_id=lead_id,
+            conversation_id=conversation_id,
             data=data or {},
-            priority=priority
+            priority=priority,
+            channels=channels,
+            status=NotificationStatus.PENDING
         )
 
+        # Persist to database if enabled
+        if self.use_persistence:
+            try:
+                notification = await self._persist_notification(notification)
+            except Exception as e:
+                logger.error(f"Failed to persist notification: {e}")
+                # Continue with in-memory only
+
+        # Store in memory cache
         self.notifications[notification.id] = notification
-        self._next_id += 1
+        self._next_id = max(self._next_id + 1, notification.id + 1)
 
         logger.info(
             f"Notification {notification.id} created: {title} "
-            f"(Type: {notification_type.value}, Priority: {priority.value})"
+            f"(Type: {notification_type.value}, Priority: {priority.value}, "
+            f"Channels: {[c.value for c in channels]})"
         )
 
-        # Send to webhook if configured
-        if company_id in self.webhooks:
-            await self._send_to_webhook(company_id, notification)
-
-        # Send via WhatsApp for high priority notifications
-        if priority in [NotificationPriority.HIGH, NotificationPriority.URGENT]:
-            await self._send_whatsapp_notification(company_id, notification)
+        # Queue for delivery
+        await self._enqueue_delivery(notification)
 
         return notification
+
+    async def _persist_notification(self, notification: Notification) -> Notification:
+        """Persist notification to Supabase."""
+        data = {
+            "company_id": notification.company_id,
+            "lead_id": notification.lead_id,
+            "conversation_id": notification.conversation_id,
+            "type": notification.notification_type.value,
+            "title": notification.title,
+            "message": notification.message,
+            "channels": [c.value for c in notification.channels],
+            "metadata": notification.data,
+            "priority": notification.priority.value,
+            "status": notification.status.value,
+            "delivery_attempts": notification.delivery_attempts,
+            "created_at": datetime.utcnow().isoformat()
+        }
+
+        result = self.supabase.table(self.TABLE_NAME).insert(data).execute()
+
+        if result.data and len(result.data) > 0:
+            notification.id = result.data[0]["id"]
+
+        return notification
+
+    async def _enqueue_delivery(self, notification: Notification):
+        """Enqueue notification for delivery."""
+        # For immediate delivery, process directly
+        # In production, this would use a proper queue like Bull/Redis
+        asyncio.create_task(self._process_delivery(notification))
+
+    async def _process_delivery(self, notification: Notification):
+        """Process notification delivery with retry."""
+        max_retries = notification.max_delivery_attempts
+        success = False
+
+        for attempt in range(max_retries):
+            try:
+                notification.delivery_attempts = attempt + 1
+                notification.status = NotificationStatus.PROCESSING
+
+                # Update status in DB
+                if self.use_persistence:
+                    await self._update_notification_status(
+                        notification.id,
+                        NotificationStatus.PROCESSING,
+                        delivery_attempts=notification.delivery_attempts
+                    )
+
+                # Deliver to each channel
+                channel_results = []
+                for channel in notification.channels:
+                    result = await self._deliver_to_channel(notification, channel)
+                    channel_results.append(result)
+
+                # Check if at least one channel succeeded
+                if any(channel_results):
+                    success = True
+                    notification.status = NotificationStatus.SENT
+                    notification.sent_at = datetime.utcnow()
+
+                    if self.use_persistence:
+                        await self._update_notification_status(
+                            notification.id,
+                            NotificationStatus.SENT,
+                            sent_at=notification.sent_at
+                        )
+
+                    logger.info(f"Notification {notification.id} sent successfully")
+                    return
+
+            except Exception as e:
+                notification.last_error = str(e)
+                logger.warning(f"Notification {notification.id} attempt {attempt + 1} failed: {e}")
+
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 2^attempt seconds
+                    await asyncio.sleep(2 ** attempt)
+
+        # All retries failed
+        if not success:
+            notification.status = NotificationStatus.FAILED
+            if self.use_persistence:
+                await self._update_notification_status(
+                    notification.id,
+                    NotificationStatus.FAILED,
+                    last_error=notification.last_error
+                )
+            logger.error(f"Notification {notification.id} failed after {max_retries} attempts")
+
+    async def _deliver_to_channel(
+        self,
+        notification: Notification,
+        channel: NotificationChannel
+    ) -> bool:
+        """Deliver notification to a specific channel."""
+        try:
+            if channel == NotificationChannel.WEBHOOK:
+                return await self._send_to_webhook(notification.company_id, notification)
+            elif channel == NotificationChannel.WHATSAPP:
+                return await self._send_whatsapp_notification(notification.company_id, notification)
+            elif channel == NotificationChannel.IN_APP:
+                # In-app notifications are already stored in DB
+                return True
+            else:
+                logger.warning(f"Unsupported channel: {channel}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to deliver to {channel}: {e}")
+            return False
+
+    async def _update_notification_status(
+        self,
+        notification_id: int,
+        status: NotificationStatus,
+        delivery_attempts: int = None,
+        sent_at: datetime = None,
+        delivered_at: datetime = None,
+        last_error: str = None
+    ):
+        """Update notification status in database."""
+        try:
+            update_data = {"status": status.value}
+            if delivery_attempts is not None:
+                update_data["delivery_attempts"] = delivery_attempts
+            if sent_at:
+                update_data["sent_at"] = sent_at.isoformat()
+            if delivered_at:
+                update_data["delivered_at"] = delivered_at.isoformat()
+            if last_error:
+                update_data["last_error"] = last_error
+
+            self.supabase.table(self.TABLE_NAME).update(update_data).eq(
+                "id", notification_id
+            ).execute()
+        except Exception as e:
+            logger.error(f"Failed to update notification status: {e}")
 
     async def _send_to_webhook(
         self,
