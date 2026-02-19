@@ -31,3 +31,6 @@ class SupabaseProxy:
 
 
 supabase = SupabaseProxy()
+
+# Alias for modules that use get_supabase()
+get_supabase = get_supabase_client
