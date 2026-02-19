@@ -156,6 +156,7 @@ class FlowExecutor:
             NodeType.DELAY.value: self._handle_delay,
             NodeType.LOOP.value: self._handle_loop,
             NodeType.SWITCH.value: self._handle_switch,
+            NodeType.PARALLEL.value: self._handle_parallel,
             NodeType.END.value: self._handle_end,
         }
 
@@ -1203,6 +1204,66 @@ class FlowExecutor:
         # Default case
         default_node = config.default_node_id or node.next_node_id
         return continue_result(default_node)
+
+    async def _handle_parallel(
+        self,
+        node: FlowNode,
+        message: str,
+        data: Dict[str, Any]
+    ) -> FlowResult:
+        """
+        Handle PARALLEL node - execute multiple paths simultaneously.
+
+        PARALLEL nodes allow branching into multiple concurrent paths.
+        All paths execute independently and can optionally merge back.
+
+        Config:
+            parallel_paths: List of node_ids to start each parallel path
+            wait_for_all: If True, wait for all paths before continuing
+            merge_node_id: Node to continue after all paths complete
+
+        Node fields:
+            parallel_node_ids: Alternative way to specify parallel paths
+        """
+        config = node.config
+
+        # Get parallel paths from config or node
+        parallel_paths = config.parallel_paths or node.parallel_node_ids or []
+
+        if not parallel_paths:
+            logger.warning(f"PARALLEL node {node.id} has no paths defined")
+            return continue_result(node.next_node_id)
+
+        # Store parallel execution state
+        parallel_state = {
+            "parallel_node_id": node.id,
+            "paths": parallel_paths,
+            "completed_paths": [],
+            "wait_for_all": config.wait_for_all if config.wait_for_all is not None else True,
+            "merge_node_id": config.merge_node_id or node.next_node_id
+        }
+
+        # Store state for tracking
+        data[f"_parallel_{node.id}"] = parallel_state
+
+        logger.info(
+            f"PARALLEL node {node.id}: Starting {len(parallel_paths)} parallel paths: {parallel_paths}"
+        )
+
+        # For now, we start the FIRST path and store the others
+        # The conversation system will need to handle tracking multiple paths
+        # This is a simplified implementation that executes paths sequentially
+        # but allows the flow to branch into multiple directions
+
+        # Return result with all parallel paths
+        return FlowResult(
+            response="",
+            result_type=ResultType.PARALLEL,
+            next_node_id=parallel_paths[0] if parallel_paths else None,
+            parallel_paths=parallel_paths[1:] if len(parallel_paths) > 1 else None,
+            data={"_parallel_state": parallel_state},
+            should_continue=True
+        )
 
     async def _handle_end(
         self,

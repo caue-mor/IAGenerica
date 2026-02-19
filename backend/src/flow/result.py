@@ -18,6 +18,7 @@ class ResultType(str, Enum):
     ERROR = "error"
     END = "end"
     CONTINUE = "continue"
+    PARALLEL = "parallel"  # For parallel execution paths
 
 
 class MediaRequestType(str, Enum):
@@ -90,6 +91,10 @@ class FlowResult:
     # Additional data
     metadata: Dict[str, Any] = field(default_factory=dict)
     extra_messages: List[str] = field(default_factory=list)
+
+    # Parallel execution
+    parallel_paths: Optional[List[str]] = None  # For PARALLEL nodes - additional paths to execute
+    data: Optional[Dict[str, Any]] = None  # Additional data to pass
 
     def is_success(self) -> bool:
         """Check if execution was successful"""
@@ -217,7 +222,9 @@ class FlowResult:
             "execution_time_ms": self.execution_time_ms,
             "timestamp": self.timestamp.isoformat(),
             "metadata": self.metadata,
-            "extra_messages": self.extra_messages
+            "extra_messages": self.extra_messages,
+            "parallel_paths": self.parallel_paths,
+            "data": self.data
         }
 
     def __str__(self) -> str:

@@ -4,6 +4,8 @@ import {
   Hand,
   HelpCircle,
   GitBranch,
+  GitMerge,
+  Split,
   MessageSquare,
   Zap,
   UserPlus,
@@ -152,13 +154,37 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   {
     type: 'CONDITION',
     label: 'Condição',
-    description: 'Decisão baseada em dados',
+    description: 'Decisão Sim/Não',
     icon: GitBranch,
     color: '#F59E0B',
     defaultConfig: {
       campo: '',
       operador: 'equals',
       valor: '',
+    },
+  },
+  {
+    type: 'SWITCH',
+    label: 'Switch',
+    description: 'Múltiplos caminhos',
+    icon: GitMerge,
+    color: '#8B5CF6',
+    defaultConfig: {
+      campo: '',
+      cases: {},
+      default_node_id: '',
+    },
+  },
+  {
+    type: 'PARALLEL',
+    label: 'Paralelo',
+    description: 'Executar múltiplos caminhos',
+    icon: Split,
+    color: '#06B6D4',
+    defaultConfig: {
+      parallel_paths: [],
+      wait_for_all: true,
+      merge_node_id: '',
     },
   },
   // Mensagens
@@ -243,7 +269,7 @@ export const NODE_CATEGORIES: NodeCategory[] = [
   },
   {
     name: 'Decisão',
-    nodes: NODE_DEFINITIONS.filter((n) => n.type === 'CONDITION'),
+    nodes: NODE_DEFINITIONS.filter((n) => ['CONDITION', 'SWITCH', 'PARALLEL'].includes(n.type)),
   },
   {
     name: 'Mensagens',

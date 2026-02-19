@@ -4,6 +4,8 @@ from .companies import router as companies_router
 from .whatsapp import router as whatsapp_router
 from .whatsapp_connect import router as whatsapp_connect_router
 from .voice import router as voice_router
+from .voice_calls import router as voice_calls_router
+from .voice_calls_webhook import router as voice_calls_webhook_router
 from .lead_statuses import router as lead_statuses_router
 from .conversations import router as conversations_router
 from .analytics import router as analytics_router
@@ -17,6 +19,8 @@ __all__ = [
     "whatsapp_router",
     "whatsapp_connect_router",
     "voice_router",
+    "voice_calls_router",
+    "voice_calls_webhook_router",
     "lead_statuses_router",
     "conversations_router",
     "analytics_router",

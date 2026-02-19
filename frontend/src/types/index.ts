@@ -15,6 +15,49 @@ export interface Company {
   use_emojis: boolean;
   informacoes_complementares?: string;
   flow_config?: FlowConfig;
+  // Voice Calls Module
+  voice_calls_enabled?: boolean;
+  voice_calls_config?: VoiceCallsConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+// Voice Calls types
+export interface VoiceCallsConfig {
+  api_key: string;
+  agent_id: string;
+  whatsapp_number_id?: string;
+  twilio_from_number?: string;
+  webhook_secret?: string;
+}
+
+export interface VoiceCallsStatus {
+  enabled: boolean;
+  configured: boolean;
+  agent_id?: string;
+  connection_status?: {
+    success: boolean;
+    tier?: string;
+    character_count?: number;
+    character_limit?: number;
+    error?: string;
+  };
+}
+
+export interface VoiceCallLog {
+  id: number;
+  company_id: number;
+  lead_id?: number;
+  call_id?: string;
+  conversation_id?: string;
+  phone: string;
+  channel: 'whatsapp' | 'twilio';
+  status: string;
+  duration_seconds?: number;
+  transcript?: any[];
+  analysis?: Record<string, any>;
+  context?: Record<string, any>;
+  error_message?: string;
   created_at: string;
   updated_at: string;
 }

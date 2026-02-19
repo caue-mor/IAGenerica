@@ -201,6 +201,26 @@ class WebhookPayload(BaseModel):
         return False
 
     @property
+    def is_manual_outbound(self) -> bool:
+        """
+        Check if this is a manual outbound message (company sent manually via WhatsApp).
+
+        This happens when:
+        - fromMe = True (sent from company's WhatsApp)
+        - wasSentByApi = False (NOT sent via API/bot)
+
+        When detected, AI should be disabled for this conversation to allow human takeover.
+        """
+        if self.message and isinstance(self.message, dict):
+            from_me = self.message.get("fromMe", False)
+            was_sent_by_api = self.message.get("wasSentByApi", True)  # Default True to be safe
+
+            # It's a manual outbound if fromMe=True AND wasSentByApi=False
+            return from_me and not was_sent_by_api
+
+        return False
+
+    @property
     def sender_phone(self) -> Optional[str]:
         """Extract sender phone number"""
         # UAZAPI format: message.sender_pn = "558599673669@s.whatsapp.net"

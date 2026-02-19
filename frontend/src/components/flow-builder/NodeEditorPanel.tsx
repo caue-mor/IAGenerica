@@ -1,8 +1,9 @@
 'use client';
 
 import { Node } from 'reactflow';
-import { X, Trash2, Volume2, MessageSquare } from 'lucide-react';
+import { X, Trash2, Volume2, MessageSquare, Plus, Trash } from 'lucide-react';
 import { FlowNodeData } from './nodes';
+import { useState } from 'react';
 
 // Vozes disponíveis do ElevenLabs
 const AVAILABLE_VOICES = [
@@ -57,6 +58,8 @@ export function NodeEditorPanel({
       GREETING: 'Editar Saudação',
       QUESTION: 'Editar Pergunta',
       CONDITION: 'Editar Condição',
+      SWITCH: 'Editar Switch (Múltiplos Caminhos)',
+      PARALLEL: 'Editar Paralelo',
       MESSAGE: 'Editar Mensagem',
       ACTION: 'Editar Ação',
       HANDOFF: 'Editar Transferência',
@@ -90,6 +93,10 @@ export function NodeEditorPanel({
         return renderQuestionEditor();
       case 'CONDITION':
         return renderConditionEditor();
+      case 'SWITCH':
+        return renderSwitchEditor();
+      case 'PARALLEL':
+        return renderParallelEditor();
       case 'MESSAGE':
       case 'END':
         return renderMessageEditor();
@@ -292,6 +299,207 @@ export function NodeEditorPanel({
       </div>
     </div>
   );
+
+  const renderSwitchEditor = () => {
+    const cases = data.config?.cases || {};
+    const caseEntries = Object.entries(cases);
+
+    const addCase = () => {
+      const newCases = { ...cases, [`Caso ${caseEntries.length + 1}`]: '' };
+      updateField('cases', newCases);
+    };
+
+    const updateCase = (oldKey: string, newKey: string, value: string) => {
+      const newCases: Record<string, string> = {};
+      Object.entries(cases).forEach(([k, v]) => {
+        if (k === oldKey) {
+          newCases[newKey] = value;
+        } else {
+          newCases[k] = v as string;
+        }
+      });
+      updateField('cases', newCases);
+    };
+
+    const removeCase = (key: string) => {
+      const newCases = { ...cases };
+      delete newCases[key];
+      updateField('cases', newCases);
+    };
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            Nome do Nó
+          </label>
+          <input
+            type="text"
+            value={data.label || ''}
+            onChange={(e) => updateLabel(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            Campo a Verificar
+          </label>
+          <input
+            type="text"
+            value={data.config?.campo || ''}
+            onChange={(e) => updateField('campo', e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder="interesse"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            O valor deste campo determinará qual caminho seguir
+          </p>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-gray-700">
+              Casos (Valores → Caminhos)
+            </label>
+            <button
+              type="button"
+              onClick={addCase}
+              className="flex items-center gap-1 rounded-lg bg-purple-100 px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-200"
+            >
+              <Plus className="h-3 w-3" />
+              Adicionar
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {caseEntries.map(([key, value], index) => (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={key}
+                  onChange={(e) => updateCase(key, e.target.value, value as string)}
+                  className="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  placeholder="Valor"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeCase(key)}
+                  className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                >
+                  <Trash className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+
+            {caseEntries.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-2">
+                Nenhum caso definido. Clique em "Adicionar" para criar.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-purple-50 p-3">
+          <p className="text-xs text-purple-800">
+            <strong>Como funciona:</strong><br />
+            Cada caso cria uma saída no nó. Quando o valor do campo corresponder a um caso, o fluxo seguirá por aquela saída.<br />
+            <strong>Saída "Outro":</strong> Se nenhum caso corresponder.
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  const renderParallelEditor = () => {
+    const paths = data.config?.parallel_paths || [];
+
+    const addPath = () => {
+      updateField('parallel_paths', [...paths, '']);
+    };
+
+    const removePath = (index: number) => {
+      const newPaths = paths.filter((_: string, i: number) => i !== index);
+      updateField('parallel_paths', newPaths);
+    };
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            Nome do Nó
+          </label>
+          <input
+            type="text"
+            value={data.label || ''}
+            onChange={(e) => updateLabel(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-gray-700">
+              Caminhos Paralelos
+            </label>
+            <button
+              type="button"
+              onClick={addPath}
+              className="flex items-center gap-1 rounded-lg bg-cyan-100 px-2 py-1 text-xs font-medium text-cyan-700 hover:bg-cyan-200"
+            >
+              <Plus className="h-3 w-3" />
+              Adicionar
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {(paths.length > 0 ? paths : ['', '']).map((_: string, index: number) => (
+              <div key={index} className="flex items-center gap-2">
+                <div
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white"
+                  style={{
+                    backgroundColor: ['#06B6D4', '#10B981', '#3B82F6', '#F59E0B', '#EC4899'][index % 5],
+                  }}
+                >
+                  {index + 1}
+                </div>
+                <span className="flex-1 text-sm text-gray-600">Caminho {index + 1}</span>
+                {paths.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => removePath(index)}
+                    className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                  >
+                    <Trash className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="wait_for_all"
+            checked={data.config?.wait_for_all !== false}
+            onChange={(e) => updateField('wait_for_all', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+          />
+          <label htmlFor="wait_for_all" className="text-sm text-gray-700">
+            Aguardar todos os caminhos completarem
+          </label>
+        </div>
+
+        <div className="rounded-lg bg-cyan-50 p-3">
+          <p className="text-xs text-cyan-800">
+            <strong>Como funciona:</strong><br />
+            O nó Paralelo executa múltiplos caminhos simultaneamente. Use para enviar notificações e continuar o fluxo ao mesmo tempo, ou para ramificar a conversa em múltiplas direções.
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   const renderMessageEditor = () => (
     <div className="space-y-4">

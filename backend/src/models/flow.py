@@ -58,6 +58,7 @@ class NodeType(str, Enum):
     DELAY = "DELAY"
     LOOP = "LOOP"
     SWITCH = "SWITCH"
+    PARALLEL = "PARALLEL"  # Execute multiple paths simultaneously
     END = "END"
 
 
@@ -261,6 +262,11 @@ class NodeConfig(BaseModel):
     cases: Optional[Dict[str, str]] = None  # value -> node_id
     default_node_id: Optional[str] = None
 
+    # ---- PARALLEL (execute multiple paths) ----
+    parallel_paths: Optional[List[str]] = None  # List of node_ids to execute in parallel
+    wait_for_all: Optional[bool] = True  # Wait for all paths to complete before continuing
+    merge_node_id: Optional[str] = None  # Node to continue after all paths complete
+
     # ---- METADATA ----
     descricao: Optional[str] = None
     notas: Optional[str] = None
@@ -281,6 +287,8 @@ class FlowNode(BaseModel):
     false_node_id: Optional[str] = None
     # For SWITCH nodes
     case_node_ids: Optional[Dict[str, str]] = None
+    # For PARALLEL nodes (execute multiple paths simultaneously)
+    parallel_node_ids: Optional[List[str]] = None
     # Visual position
     position: Optional[Dict[str, Any]] = None  # {x, y} for visual builder - Any to accept int or float
     # Metadata

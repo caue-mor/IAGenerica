@@ -7,6 +7,8 @@ import {
   Hand,
   HelpCircle,
   GitBranch,
+  GitMerge,
+  Split,
   MessageSquare,
   Zap,
   UserPlus,
@@ -49,6 +51,13 @@ export interface FlowNodeData {
     voice_stability?: number;
     voice_similarity?: number;
     custom_voice?: boolean;
+    // SWITCH node config
+    cases?: Record<string, string>; // value -> node_id mapping
+    default_node_id?: string;
+    // PARALLEL node config
+    parallel_paths?: string[]; // array of node_ids to execute in parallel
+    wait_for_all?: boolean;
+    merge_node_id?: string;
   };
 }
 
@@ -327,6 +336,94 @@ export const AgendamentoNode = memo(({ data, selected }: NodeProps<FlowNodeData>
 });
 AgendamentoNode.displayName = 'AgendamentoNode';
 
+// ==================== SWITCH NODE (Multiple Conditions) ====================
+export const SwitchNode = memo(({ data, selected }: NodeProps<FlowNodeData>) => {
+  // Generate outputs from cases configuration
+  const cases = data.config?.cases || {};
+  const caseKeys = Object.keys(cases);
+
+  // Define output handles dynamically based on cases
+  const outputs = [
+    ...caseKeys.map((key, index) => ({
+      id: `case_${key}`,
+      label: key.length > 8 ? key.substring(0, 8) + '...' : key,
+      color: ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6'][index % 5],
+    })),
+    // Always have a default output
+    {
+      id: 'default',
+      label: 'Outro',
+      color: '#6B7280',
+    },
+  ];
+
+  return (
+    <BaseNode
+      label={data.label || 'Switch'}
+      icon={GitMerge}
+      color="#8B5CF6"
+      selected={selected}
+      multipleOutputs={outputs}
+    >
+      {data.config?.campo ? (
+        <div>
+          <p className="font-mono text-[11px]">
+            Campo: <span className="text-purple-600">{data.config.campo}</span>
+          </p>
+          {caseKeys.length > 0 && (
+            <p className="mt-1 text-[10px] text-gray-400">
+              {caseKeys.length} caso(s) + padrão
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-[10px] text-gray-400">Configure os casos</p>
+      )}
+    </BaseNode>
+  );
+});
+SwitchNode.displayName = 'SwitchNode';
+
+// ==================== PARALLEL NODE (Execute Multiple Paths) ====================
+export const ParallelNode = memo(({ data, selected }: NodeProps<FlowNodeData>) => {
+  // Generate outputs from parallel_paths configuration
+  const paths = data.config?.parallel_paths || [];
+
+  // Define output handles for each parallel path
+  const outputs = paths.length > 0
+    ? paths.map((_, index) => ({
+        id: `path_${index}`,
+        label: `Caminho ${index + 1}`,
+        color: ['#06B6D4', '#10B981', '#3B82F6', '#F59E0B', '#EC4899'][index % 5],
+      }))
+    : [
+        { id: 'path_0', label: 'Caminho 1', color: '#06B6D4' },
+        { id: 'path_1', label: 'Caminho 2', color: '#10B981' },
+      ];
+
+  return (
+    <BaseNode
+      label={data.label || 'Paralelo'}
+      icon={Split}
+      color="#06B6D4"
+      selected={selected}
+      multipleOutputs={outputs}
+    >
+      <div>
+        <p className="text-[10px]">
+          {paths.length || 2} caminhos paralelos
+        </p>
+        {data.config?.wait_for_all !== false && (
+          <p className="mt-1 text-[10px] text-gray-400">
+            Aguarda todos completarem
+          </p>
+        )}
+      </div>
+    </BaseNode>
+  );
+});
+ParallelNode.displayName = 'ParallelNode';
+
 // ==================== END NODE ====================
 export const EndNode = memo(({ data, selected }: NodeProps<FlowNodeData>) => {
   return (
@@ -350,6 +447,8 @@ export const nodeTypes = {
   GREETING: GreetingNode,
   QUESTION: QuestionNode,
   CONDITION: ConditionNode,
+  SWITCH: SwitchNode,
+  PARALLEL: ParallelNode,
   MESSAGE: MessageNode,
   ACTION: ActionNode,
   HANDOFF: HandoffNode,
@@ -367,6 +466,8 @@ export const nodeTypes = {
   greeting: GreetingNode,
   question: QuestionNode,
   condition: ConditionNode,
+  switch: SwitchNode,
+  parallel: ParallelNode,
   message: MessageNode,
   action: ActionNode,
   handoff: HandoffNode,

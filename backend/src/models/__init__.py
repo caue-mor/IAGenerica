@@ -36,6 +36,13 @@ from .followup import (
     FollowupScheduleRequest, FollowupTemplate,
     STAGE_HOURS, DEFAULT_TEMPLATES, get_template
 )
+from .voice_call import (
+    CallChannel, CallStatus,
+    VoiceCallConfig, VoiceCallLog,
+    VoiceCallLogCreate, VoiceCallLogUpdate,
+    VoiceCallInitRequest, VoiceCallInitResponse,
+    VoiceCallsStatusResponse
+)
 
 __all__ = [
     # Company
@@ -67,5 +74,12 @@ __all__ = [
     "Followup", "FollowupCreate", "FollowupUpdate",
     "FollowupStatus", "FollowupStage", "FollowupReason",
     "FollowupScheduleRequest", "FollowupTemplate",
-    "STAGE_HOURS", "DEFAULT_TEMPLATES", "get_template"
+    "STAGE_HOURS", "DEFAULT_TEMPLATES", "get_template",
+
+    # Voice Calls
+    "CallChannel", "CallStatus",
+    "VoiceCallConfig", "VoiceCallLog",
+    "VoiceCallLogCreate", "VoiceCallLogUpdate",
+    "VoiceCallInitRequest", "VoiceCallInitResponse",
+    "VoiceCallsStatusResponse"
 ]

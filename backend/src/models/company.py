@@ -32,6 +32,11 @@ class Company(BaseModel):
     use_emojis: bool = False
     informacoes_complementares: Optional[str] = None
     flow_config: Optional[dict[str, Any]] = None
+
+    # Voice Calls Module (opcional)
+    voice_calls_enabled: bool = False  # Toggle para ativar/desativar chamadas
+    voice_calls_config: Optional[dict[str, Any]] = None  # Config do módulo
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -57,6 +62,10 @@ class CompanyCreate(BaseModel):
     informacoes_complementares: Optional[str] = None
     flow_config: Optional[dict[str, Any]] = None
 
+    # Voice Calls Module (opcional - desativado por padrão)
+    voice_calls_enabled: bool = False
+    voice_calls_config: Optional[dict[str, Any]] = None
+
 
 class CompanyUpdate(BaseModel):
     """Company update schema"""
@@ -75,3 +84,7 @@ class CompanyUpdate(BaseModel):
     use_emojis: Optional[bool] = None
     informacoes_complementares: Optional[str] = None
     flow_config: Optional[dict[str, Any]] = None
+
+    # Voice Calls Module
+    voice_calls_enabled: Optional[bool] = None
+    voice_calls_config: Optional[dict[str, Any]] = None

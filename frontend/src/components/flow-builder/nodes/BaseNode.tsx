@@ -4,6 +4,12 @@ import { Handle, Position } from 'reactflow';
 import { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+interface OutputHandle {
+  id: string;
+  label: string;
+  color?: string;
+}
+
 interface BaseNodeProps {
   label: string;
   icon: LucideIcon;
@@ -12,6 +18,7 @@ interface BaseNodeProps {
   hasInput?: boolean;
   hasOutput?: boolean;
   hasConditionalOutputs?: boolean;
+  multipleOutputs?: OutputHandle[];
   selected?: boolean;
 }
 
@@ -23,6 +30,7 @@ export function BaseNode({
   hasInput = true,
   hasOutput = true,
   hasConditionalOutputs = false,
+  multipleOutputs,
   selected = false,
 }: BaseNodeProps) {
   return (
@@ -65,7 +73,40 @@ export function BaseNode({
       )}
 
       {/* Output Handles */}
-      {hasConditionalOutputs ? (
+      {multipleOutputs && multipleOutputs.length > 0 ? (
+        <>
+          {multipleOutputs.map((output, index) => {
+            const total = multipleOutputs.length;
+            const position = ((index + 1) / (total + 1)) * 100;
+            const handleColor = output.color || color;
+            return (
+              <div key={output.id}>
+                <Handle
+                  type="source"
+                  position={Position.Bottom}
+                  id={output.id}
+                  className="!h-3 !w-3 !border-2 !border-white"
+                  style={{
+                    bottom: -6,
+                    left: `${position}%`,
+                    backgroundColor: handleColor,
+                  }}
+                />
+                <span
+                  className="absolute text-[10px] font-medium"
+                  style={{
+                    bottom: -20,
+                    left: `${position - 5}%`,
+                    color: handleColor,
+                  }}
+                >
+                  {output.label}
+                </span>
+              </div>
+            );
+          })}
+        </>
+      ) : hasConditionalOutputs ? (
         <>
           {/* True Handle (Left) */}
           <Handle

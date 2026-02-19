@@ -17,6 +17,8 @@ from .routes import (
     whatsapp_router,
     whatsapp_connect_router,
     voice_router,
+    voice_calls_router,
+    voice_calls_webhook_router,
     lead_statuses_router,
     conversations_router,
     analytics_router,
@@ -68,6 +70,8 @@ def create_app() -> FastAPI:
     app.include_router(whatsapp_router)  # WhatsApp/UAZAPI management (legacy)
     app.include_router(whatsapp_connect_router)  # WhatsApp connection management (new)
     app.include_router(voice_router, prefix="/api")  # Voice/TTS service
+    app.include_router(voice_calls_router, prefix="/api")  # Voice calls (ElevenLabs)
+    app.include_router(voice_calls_webhook_router)  # ElevenLabs webhooks (no prefix)
     app.include_router(analytics_router, prefix="/api")  # Analytics and metrics
     app.include_router(proposals_router, prefix="/api")  # Proposal management
     app.include_router(documents_router, prefix="/api")  # Document extraction
