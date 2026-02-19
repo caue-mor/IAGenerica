@@ -8,7 +8,8 @@ from typing import Any, Optional
 from datetime import datetime, timedelta
 from langchain_core.tools import tool
 from ...services.database import db
-from ...services.followup_scheduler import followup_scheduler, FollowupType
+from ...services.enhanced_followup import enhanced_followup
+from ...models.followup import FollowupReason, FollowupStage
 
 logger = logging.getLogger(__name__)
 
@@ -140,27 +141,32 @@ async def schedule_followup(
         await db.update_lead_field(lead_id, "followups", existing_followups)
         await db.update_lead_field(lead_id, "next_followup_at", scheduled_datetime.isoformat())
 
-        # Register with follow-up scheduler service for automatic sending
-        type_map = {
-            "general": FollowupType.CUSTOM,
-            "reminder": FollowupType.REMINDER,
-            "proposal": FollowupType.PROPOSAL,
-            "negotiation": FollowupType.CUSTOM,
-            "check_in": FollowupType.REMINDER,
-            "reengagement": FollowupType.REENGAGEMENT,
-            "qualification": FollowupType.QUALIFICATION
+        # Register with enhanced follow-up service (database persistence)
+        reason_map = {
+            "general": FollowupReason.INACTIVITY,
+            "reminder": FollowupReason.INACTIVITY,
+            "proposal": FollowupReason.PROPOSAL_SENT,
+            "negotiation": FollowupReason.CUSTOM,
+            "check_in": FollowupReason.INACTIVITY,
+            "reengagement": FollowupReason.INACTIVITY,
+            "qualification": FollowupReason.FIELD_PENDING
         }
 
-        scheduled_followup = await followup_scheduler.schedule_followup(
+        # Calculate delay in hours from now to scheduled time
+        delay_hours = max(0.1, (scheduled_datetime - datetime.utcnow()).total_seconds() / 3600)
+
+        scheduled_followup = await enhanced_followup.schedule_followup(
             company_id=lead.company_id,
             lead_id=lead_id,
+            reason=reason_map.get(followup_type, FollowupReason.CUSTOM),
+            stage=FollowupStage.FIRST,
+            delay_hours=delay_hours,
             message=message,
-            scheduled_for=scheduled_datetime,
-            followup_type=type_map.get(followup_type, FollowupType.CUSTOM),
-            metadata={"notes": notes, "tool_scheduled": True}
+            context={"notes": notes, "tool_scheduled": True}
         )
 
-        followup_data["scheduler_id"] = scheduled_followup.id
+        if scheduled_followup:
+            followup_data["scheduler_id"] = scheduled_followup.id
 
         logger.info(f"[TOOL] schedule_followup - SUCCESS - scheduled for {scheduled_datetime.isoformat()} (scheduler ID: {scheduled_followup.id})")
 

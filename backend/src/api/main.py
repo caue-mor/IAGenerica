@@ -6,7 +6,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..core.config import settings
-from ..services.followup_scheduler import followup_scheduler
 from ..services.notification import notification_service
 from ..services.enhanced_followup import enhanced_followup
 from ..middleware.rate_limiter import rate_limiter, rate_limit_middleware
@@ -95,10 +94,6 @@ def create_app() -> FastAPI:
         """Startup event"""
         logger.info(f"Starting {settings.APP_NAME}...")
 
-        # Start the follow-up scheduler
-        await followup_scheduler.start_scheduler()
-        logger.info("Follow-up scheduler started")
-
         # Start the notification delivery worker
         await notification_service.start_worker()
         logger.info("Notification worker started")
@@ -115,10 +110,6 @@ def create_app() -> FastAPI:
     async def shutdown():
         """Shutdown event"""
         logger.info(f"Shutting down {settings.APP_NAME}...")
-
-        # Stop the follow-up scheduler
-        await followup_scheduler.stop_scheduler()
-        logger.info("Follow-up scheduler stopped")
 
         # Stop the notification worker
         await notification_service.stop_worker()

@@ -21,15 +21,6 @@ from .vision import vision, VisionService
 # Message buffering
 from .buffer import message_buffer, MessageBufferService, BufferedMessage, ConversationBuffer
 
-# Follow-up scheduling
-from .followup_scheduler import (
-    followup_scheduler,
-    FollowupSchedulerService,
-    ScheduledFollowup,
-    FollowupStatus,
-    FollowupType
-)
-
 # Notifications
 from .notification import (
     notification_service,
@@ -115,13 +106,6 @@ __all__ = [
     "MessageBufferService",
     "BufferedMessage",
     "ConversationBuffer",
-
-    # Follow-up Scheduler
-    "followup_scheduler",
-    "FollowupSchedulerService",
-    "ScheduledFollowup",
-    "FollowupStatus",
-    "FollowupType",
 
     # Notifications
     "notification_service",
